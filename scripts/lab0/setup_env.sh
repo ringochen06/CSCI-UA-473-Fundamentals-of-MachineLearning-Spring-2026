@@ -7,7 +7,11 @@ conda deactivate 2>/dev/null || true
 deactivate 2>/dev/null || true
 
 # Install uv (if not installed). WARNING: the next line pipes a script from the web to sh.
-which uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+if ! which uv >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    # Add uv to PATH for this session
+    export PATH="$HOME/.local/bin:$PATH"
+fi
 
 # Create virtual environment
 uv venv --python 3.11
