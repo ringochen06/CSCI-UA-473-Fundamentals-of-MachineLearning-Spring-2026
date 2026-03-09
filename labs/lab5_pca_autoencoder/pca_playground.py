@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import sys
 
 import numpy as np
@@ -32,9 +33,68 @@ DATASET_CONFIG = {
     },
 }
 
+# ----------------------------------------------------------------------
+# Persistence: save small Lab 5 state to lab_json/lab5_form_answers.json
+# ----------------------------------------------------------------------
+_LAB5_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_LAB5_ANSWERS_DIR = os.path.join(_LAB5_ROOT, "lab_json")
+_LAB5_ANSWERS_FILE = os.path.join(_LAB5_ANSWERS_DIR, "lab5_form_answers.json")
+
+# Only persist simple keys we care about (choices, code, step flags)
+_LAB5_KEYS = [
+    "lab5_dataset_choice",
+    "lab5_embedding_choice",
+    "pca_code",
+    "pca_viz_code",
+    "ae_code",
+    "train_code",
+    "step_1_done",
+    "step_2_done",
+]
+
+
+def _lab5_load():
+    if os.path.isfile(_LAB5_ANSWERS_FILE):
+        try:
+            with open(_LAB5_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _lab5_save():
+    data = {}
+    for key in _LAB5_KEYS:
+        if key not in st.session_state:
+            continue
+        val = st.session_state[key]
+        if isinstance(val, (str, int, float, bool, type(None))):
+            data[key] = val
+
+    try:
+        existing = {}
+        if os.path.isfile(_LAB5_ANSWERS_FILE):
+            with open(_LAB5_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            return
+        os.makedirs(_LAB5_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB5_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        # Persistence should never break the lab
+        pass
+
 
 def render_pca_lab():
     st.header("Lab 5: Dimensionality Reduction (PCA & Autoencoders)")
+
+    # Load from file only when key missing (e.g. after refresh); don't overwrite user's current input
+    raw = _lab5_load()
+    for key in _LAB5_KEYS:
+        if key in raw and key not in st.session_state:
+            st.session_state[key] = raw[key]
 
     # Dataset selector
     dataset_choice = st.selectbox(
@@ -118,6 +178,9 @@ def render_pca_lab():
 
     with tab3:
         render_step_3_train(embeddings, cfg, emb_dim)
+
+    # Persist so refresh keeps selections, code, and step flags (no-op if unchanged)
+    _lab5_save()
 
 
 # ── Helpers for feature-highlighted scatter plots ─────────────────
@@ -294,7 +357,10 @@ reduced_data = pca.fit_transform(embeddings)"""  # noqa: F841
 
     def_code = f"""# 'embeddings' is available (shape: N, {emb_dim})"""  # noqa: F841
 
-    code = st.text_area("PCA Code:", value=def_code, height=200, key="pca_code")
+    # Use last saved code if available; otherwise fall back to default template
+    code_default = st.session_state.get("pca_code", def_code)
+    code = st.text_area("PCA Code:", value=code_default, height=200)
+    st.session_state["pca_code"] = code
 
     if st.button("Run PCA"):
         st.session_state["lab5_vars"] = {"embeddings": embeddings}
@@ -349,12 +415,14 @@ df_vis["Title"] = titles
 fig = px.scatter(df_vis, x="PC1", y="PC2", hover_data=["Title"],
                  title="PCA Projection (2D)", opacity=0.6)"""  # noqa: F841
 
+        # Same pattern: prefer saved visualization code over default
+        viz_default = st.session_state.get("pca_viz_code", default_viz_code)
         viz_code = st.text_area(
             "Visualization Code:",
-            value=default_viz_code,
+            value=viz_default,
             height=250,
-            key="pca_viz_code",
         )
+        st.session_state["pca_viz_code"] = viz_code
 
         if st.button("Run Visualization", key="run_viz_btn"):
             # Ensure lab5_vars exists
@@ -676,9 +744,11 @@ class Autoencoder(nn.Module):
     default_code = """#TODO: fill in the code:
 """  # noqa: F841
 
+    ae_default = st.session_state.get("ae_code", default_code)
     code = st.text_area(
-        "Model Architecture:", value=default_code, height=300, key="ae_code"
+        "Model Architecture:", value=ae_default, height=300
     )
+    st.session_state["ae_code"] = code
 
     if st.button("Check Architecture"):
         # Pre-populate globals with torch and nn so they're always available
@@ -1005,9 +1075,11 @@ data_tensor = torch.tensor(embeddings, dtype=torch.float32)
 print("Training finished!")
 """  # noqa: F841
 
+    train_default = st.session_state.get("train_code", default_code)
     code = st.text_area(
-        "Training Loop:", value=default_code, height=500, key="train_code"
+        "Training Loop:", value=train_default, height=500
     )
+    st.session_state["train_code"] = code
 
     if st.button("Train Model"):
         # Prepare context

@@ -16,6 +16,8 @@ generalization and distribution shift.
 """
 
 import io
+import json
+import os
 import sys
 
 import numpy as np
@@ -148,6 +150,50 @@ def display_scatter(preds, actuals, title="Predicted vs Actual"):
 
 
 # ======================================================================
+# Persistence: lab_json/lab4_form_answers.json (only Lab 4 keys)
+# ======================================================================
+_LAB4_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_LAB4_ANSWERS_DIR = os.path.join(_LAB4_ROOT, "lab_json")
+_LAB4_ANSWERS_FILE = os.path.join(_LAB4_ANSWERS_DIR, "lab4_form_answers.json")
+
+
+def _lab4_load():
+    if os.path.isfile(_LAB4_ANSWERS_FILE):
+        try:
+            with open(_LAB4_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _lab4_save():
+    # Only persist simple lab4 keys (code boxes and step flags); never widget keys like lab4_run_*
+    data = {}
+    for key, val in st.session_state.items():
+        if not isinstance(key, str) or not key.startswith("lab4_"):
+            continue
+        if key in ("lab4_vars", "lab4_results", "lab4_map_data"):
+            continue
+        if key.startswith("lab4_run_"):  # button keys: must not persist (Streamlit owns them)
+            continue
+        if isinstance(val, (str, int, float, bool, type(None))):
+            data[key] = val
+    try:
+        existing = {}
+        if os.path.isfile(_LAB4_ANSWERS_FILE):
+            with open(_LAB4_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            return
+        os.makedirs(_LAB4_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB4_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+# ======================================================================
 # Main render function
 # ======================================================================
 
@@ -197,6 +243,15 @@ def render_generalization_lab():  # noqa: C901
     if "lab4_map_data" not in st.session_state:
         st.session_state["lab4_map_data"] = {}
 
+    # Load from file only when key missing (e.g. after refresh); don't overwrite user's current input
+    # Never assign to widget keys (e.g. lab4_run_*) or Streamlit raises
+    raw = _lab4_load()
+    for k, v in raw.items():
+        if not k.startswith("lab4_") or k in ("lab4_vars", "lab4_results", "lab4_map_data") or k.startswith("lab4_run_"):
+            continue
+        if k not in st.session_state:
+            st.session_state[k] = v
+
     st.sidebar.divider()
     show_solutions = st.sidebar.checkbox(
         "Show solution code", value=False, key="lab4_show_solutions"
@@ -221,6 +276,9 @@ def render_generalization_lab():  # noqa: C901
 
     if st.session_state.get("lab4_step_6_done"):
         _render_comparison()
+
+    # Persist so refresh keeps content (no-op if unchanged)
+    _lab4_save()
 
 
 # ======================================================================

@@ -5,7 +5,31 @@ import numpy as np
 import streamlit as st
 import torch
 
-SAVE_FILE = "dungeon_tensor_save.json"
+# Use path by script location so refresh always finds the same file
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SAVE_FILE = os.path.join(_ROOT, "lab_json", "lab1_game_save.json")
+
+# Only save/load Lab 1 game keys (no other labs' session_state)
+_LAB1_GAME_KEYS = frozenset({
+    "player_name", "magic_number", "game_started", "level", "hp", "max_hp",
+    "xp", "gold", "revival_count", "dice_count", "inventory", "logs",
+    "in_shop", "dungeon_map", "answered_mcqs", "merchant_count",
+    "merchant_dice_rolled", "last_roll", "shop_available",
+    "ev_questions_solved", "prob_question_solved", "rng_offset",
+    "level_complete", "shop_from_boss_lobby", "tensor_x",
+})
+
+
+def _is_lab1_game_key(key):
+    if not isinstance(key, str):
+        return False
+    if key in _LAB1_GAME_KEYS:
+        return True
+    if key.startswith(("code_", "mcq_", "frq_", "saved_frq_", "boss_code_")):
+        return True
+    if key.startswith("boss_") and key.endswith("_solved"):
+        return True
+    return False
 
 
 def serialize_value(val):
@@ -67,38 +91,79 @@ def deserialize_value(val):
     return val
 
 
-def save_game():
-    """Saves the current st.session_state to a JSON file."""
+def _has_progress(state_dict):
+    """True if state has level > 0 or any in-level answers (mcq/code/frq/boss)."""
+    if not state_dict:
+        return False
+    level = state_dict.get("level")
+    if isinstance(level, (int, float)) and level > 0:
+        return True
+    for key in state_dict:
+        if key.startswith(("code_", "mcq_", "frq_", "saved_frq_", "boss_code_")) or (
+            key.startswith("boss_") and key.endswith("_solved")
+        ):
+            return True
+    return False
+
+
+def save_game_silent():
+    """Saves Lab 1 game state only (only lab1 keys); only when changed.
+    Does not overwrite an existing save that has progress with a fresh "just entered" state
+    (so Restart -> Enter Dungeon again does not wipe the file)."""
     state_to_save = {}
-
-    # Filter out Streamlit internal keys if necessary,
-    # generally they start with specialized prefixes or are not standard session_state items set by user
-    # We iterate strict keys we care about?
-    # Or just iterate all and try-catch.
-    # Iterating all is safer to capture dynamic keys like 'saved_frq_...'
-
     for key, val in st.session_state.items():
-        # Skip UI component keys that shouldn't be persisted (like button states or temp inputs)
-        # Often temp inputs have generic generated keys, but user-named keys are fine.
-        # Let's save everything that is serializable.
+        if not _is_lab1_game_key(key):
+            continue
         try:
-            # We don't check json.dumps here because we have custom serializer
-            # But we might want to skip keys that are clearly widgets (FormSubmitter?)
-            if isinstance(key, str) and (
-                key.startswith("FormSubmitter")
-                or key.startswith("btn_")
-                or key == "authentication_status"
-            ):
-                continue
+            state_to_save[key] = serialize_value(val)
+        except Exception:
+            pass
+    try:
+        existing = {}
+        if os.path.exists(SAVE_FILE):
+            with open(SAVE_FILE, "r") as f:
+                existing = json.load(f)
+        if state_to_save == existing:
+            return True
+        # Don't overwrite a save that has progress with initial state (level=0, no answers)
+        if existing and _has_progress(existing) and not _has_progress(state_to_save):
+            return True
+        os.makedirs(os.path.dirname(SAVE_FILE), exist_ok=True)
+        with open(SAVE_FILE, "w") as f:
+            json.dump(state_to_save, f, indent=2)
+        return True
+    except Exception:
+        return False
 
-            serialized = serialize_value(val)
-            # Verify json serializability
-            # json.dumps(serialized) # Optional check, adds overhead but strictness
-            state_to_save[key] = serialized
+
+def load_game_silent():
+    """Loads Lab 1 game state from lab1_game_save.json into session_state (no toast/rerun)."""
+    if not os.path.exists(SAVE_FILE):
+        return False
+    try:
+        with open(SAVE_FILE, "r") as f:
+            saved_state = json.load(f)
+        for key, val in saved_state.items():
+            if _is_lab1_game_key(key):
+                st.session_state[key] = deserialize_value(val)
+        return True
+    except Exception:
+        return False
+
+
+def save_game():
+    """Saves Lab 1 game state only to lab1_game_save.json."""
+    state_to_save = {}
+    for key, val in st.session_state.items():
+        if not _is_lab1_game_key(key):
+            continue
+        try:
+            state_to_save[key] = serialize_value(val)
         except Exception as e:
             print(f"Skipping key '{key}' during save due to serialization error: {e}")
 
     try:
+        os.makedirs(os.path.dirname(SAVE_FILE), exist_ok=True)
         with open(SAVE_FILE, "w") as f:
             json.dump(state_to_save, f, indent=2)
         st.toast("Game Saved Successfully!", icon="💾")
@@ -123,9 +188,8 @@ def load_game():
         # Let's use st.session_state.update
 
         for key, val in saved_state.items():
-            if key.startswith("btn_"):
-                continue
-            st.session_state[key] = deserialize_value(val)
+            if _is_lab1_game_key(key):
+                st.session_state[key] = deserialize_value(val)
 
         st.toast("Game Loaded Successfully!", icon="📂")
         st.rerun()

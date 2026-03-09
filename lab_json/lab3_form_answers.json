@@ -1,0 +1,14 @@
+{
+  "code_1": "from sentence_transformers import SentenceTransformer\n\nmodel = SentenceTransformer(\n    \"nomic-ai/nomic-embed-text-v1.5\",\n    trust_remote_code=True\n)",
+  "code_2": "texts = [\"Hello world\", \"Machine learning\"]\n\nembeddings = model.encode(texts)",
+  "code_3": "query = \"search_query: What is the best movie about dreams?\"\n\ndoc = \"search_document: Dom Cobb is a skilled thief who steals secrets from deep within the subconscious during the dream state.\"\n\nquery_emb = model.encode(query, normalize_embeddings=True)\ndoc_emb = model.encode(doc, normalize_embeddings=True)",
+  "code_4": "corpus = [\n\"The Matrix: A computer hacker learns from mysterious rebels about the true nature of his reality.\",\n\"Titanic: A seventeen-year-old aristocrat falls in love with a kind but poor artist aboard the luxurious, ill-fated R.M.S. Titanic.\",\n\"Avengers: Earth's mightiest heroes must come together and learn to fight as a team.\",\n\"Interstellar: A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival.\",\n\"Shrek: A mean lord exiles fairytale creatures to the swamp of a grumpy ogre.\"\n]\n\ncorpus_with_prefix = [\"search_document: \" + doc for doc in corpus]\n\ncorpus_embeddings = model.encode(corpus_with_prefix, normalize_embeddings=True)\n\nscores = corpus_embeddings @ query_emb.T\n\ntop_k_indices = np.argsort(scores)[::-1][:3]\n\nsimilarity = query_emb @ doc_emb.T",
+  "code_5": "# 'model' and 'query_emb' are available\ncorpus = [\n    \"The Matrix: A computer hacker learns from mysterious rebels about the true nature of his reality.\",\n    \"Titanic: A seventeen-year-old aristocrat falls in love with a kind but poor artist aboard the luxurious, ill-fated R.M.S. Titanic.\",\n    \"Avengers: Earth's mightiest heroes must come together and learn to fight as a team.\",\n    \"Interstellar: A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival.\",\n    \"Shrek: A mean lord exiles fairytale creatures to the swamp of a grumpy ogre.\"]\n\ncorpus_with_prefix = [\"search_document: \" + doc for doc in corpus]\ncorpus_embeddings = model.encode(corpus_with_prefix, normalize_embeddings=True)\nscores = corpus_embeddings @ query_emb.T\ntop_k_indices = np.argsort(scores)[::-1][:3]",
+  "lab3_user_answer": "A search engine should distinguish between a query and a document because they play different roles. A query is usually short and expresses the user’s intent, while a document is longer and contains detailed content. Treating them differently helps the model produce better embeddings for matching user intent to relevant documents.\n",
+  "lab3_user_query": "apple",
+  "step_1_done": true,
+  "step_2_done": true,
+  "step_3_done": true,
+  "step_4_done": true,
+  "step_5_done": true
+}
