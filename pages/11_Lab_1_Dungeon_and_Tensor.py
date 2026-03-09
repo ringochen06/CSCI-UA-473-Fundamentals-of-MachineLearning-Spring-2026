@@ -1,3 +1,4 @@
+import json
 import os
 
 import streamlit as st
@@ -13,7 +14,13 @@ from labs.lab1_dungeon_and_tensor.levels import (
     check_level_11,
     get_levels,
 )
-from labs.lab1_dungeon_and_tensor.save_load import load_game, save_game
+from labs.lab1_dungeon_and_tensor.save_load import (
+    SAVE_FILE,
+    load_game,
+    load_game_silent,
+    save_game,
+    save_game_silent,
+)
 from labs.lab1_dungeon_and_tensor.ui_components import (
     render_boss_level,
     render_level,
@@ -29,13 +36,124 @@ st.set_page_config(
     page_title="Lab 1: Dungeon and Tensor", page_icon="⚔️", layout="wide"
 )
 
-init_game()
+# Path by script location so it's the same on refresh (getcwd() can differ).
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_LAB_ANSWERS_DIR = os.path.join(_PROJECT_ROOT, "lab_json")
+_LAB1_ANSWERS_FILE = os.path.join(_LAB_ANSWERS_DIR, "lab1_form_answers.json")
+
+_LAB1_KEYS = ["lab1_hero_name", "lab1_seed"]
+_LAB1_SESSION_KEY = "form_answers_lab1"
+
+
+def _load_form_answers():
+    if os.path.isfile(_LAB1_ANSWERS_FILE):
+        try:
+            with open(_LAB1_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_form_answers():
+    """Only write Lab 1 keys when data actually changed (don't overwrite on every run/refresh)."""
+    data = {}
+    for key in _LAB1_KEYS:
+        if key in st.session_state:
+            val = st.session_state[key]
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                data[key] = val
+    try:
+        existing = {}
+        if os.path.isfile(_LAB1_ANSWERS_FILE):
+            with open(_LAB1_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            return
+        os.makedirs(_LAB_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB1_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+if _LAB1_SESSION_KEY not in st.session_state:
+    st.session_state[_LAB1_SESSION_KEY] = {}
+
+
+def _restore_lab1():
+    """Restore saved name/seed into session_state so widgets show them after refresh."""
+    saved = st.session_state[_LAB1_SESSION_KEY]
+    for key in _LAB1_KEYS:
+        if key in saved and saved.get(key) not in (None, ""):
+            st.session_state[key] = saved[key]
+
+
+def _load_lab1_from_disk():
+    """Read name/seed from file when showing start screen so refresh always shows saved values."""
+    if os.path.isfile(_LAB1_ANSWERS_FILE):
+        try:
+            with open(_LAB1_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("lab1_hero_name"):
+                st.session_state["lab1_hero_name"] = data["lab1_hero_name"]
+            if data.get("lab1_seed") is not None:
+                st.session_state["lab1_seed"] = int(data["lab1_seed"])
+        except (json.JSONDecodeError, OSError):
+            pass
+
+
+def _stash_lab1():
+    saved = st.session_state[_LAB1_SESSION_KEY]
+    for key in _LAB1_KEYS:
+        if key in st.session_state:
+            val = st.session_state[key]
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                saved[key] = val
+    _save_form_answers()
+
+
+# New session: try restore from save file so refresh continues the game
+if "level" not in st.session_state:
+    if os.path.isfile(SAVE_FILE) and load_game_silent():
+        # Game save may have overwritten session; re-load name/seed from lab1 file
+        if os.path.isfile(_LAB1_ANSWERS_FILE):
+            try:
+                with open(_LAB1_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                st.session_state[_LAB1_SESSION_KEY] = {
+                    k: data[k] for k in _LAB1_KEYS if k in data
+                }
+                if data.get("lab1_hero_name"):
+                    st.session_state["lab1_hero_name"] = data["lab1_hero_name"]
+                if data.get("lab1_seed") is not None:
+                    st.session_state["lab1_seed"] = int(data["lab1_seed"])
+            except (json.JSONDecodeError, OSError):
+                pass
+    else:
+        init_game()
 set_seed()
+
+# Auto-save when in game so refresh can restore
+if st.session_state.get("game_started"):
+    save_game_silent()
 
 # ==============================================================================
 # START SCREEN
 # ==============================================================================
 if not st.session_state.game_started:
+    # Every time start screen opens: load existing answers from file so they are shown
+    _load_lab1_from_disk()
+    raw = _load_form_answers()
+    for k in _LAB1_KEYS:
+        if k in raw:
+            st.session_state[_LAB1_SESSION_KEY][k] = raw[k]
+    _restore_lab1()
+    if "lab1_hero_name" not in st.session_state:
+        st.session_state["lab1_hero_name"] = ""
+    if "lab1_seed" not in st.session_state:
+        st.session_state["lab1_seed"] = 42
+    # Save only via on_change on name/seed inputs, not every run (don't overwrite file on refresh)
     st.title("🏹 Lab 1: Dungeon and Tensor")
     st.markdown("### Enter the Tensor Dungeon")
     st.info(
@@ -44,14 +162,20 @@ if not st.session_state.game_started:
 
     col1, col2 = st.columns(2)
     with col1:
-        name_input = st.text_input("Hero Name", placeholder="e.g. Alyx the Tensor")
+        name_input = st.text_input(
+            "Hero Name",
+            placeholder="e.g. Alyx the Tensor",
+            key="lab1_hero_name",
+            on_change=_stash_lab1,
+        )
     with col2:
         seed_input = st.number_input(
             "Magic Number (Seed)",
             min_value=0,
             max_value=9999,
-            value=42,
+            key="lab1_seed",
             help="This controls the randomness of your journey.",
+            on_change=_stash_lab1,
         )
 
     if st.button("Enter Dungeon"):

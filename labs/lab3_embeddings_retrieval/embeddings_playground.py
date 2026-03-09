@@ -1,4 +1,6 @@
 import io
+import json
+import os
 import sys
 
 import numpy as np
@@ -65,10 +67,69 @@ def render_embeddings_lab():
     render_text_coding_lab()
 
 
+# Persistence: lab_json/lab3_form_answers.json (only Lab 3 keys)
+_LAB3_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_LAB3_ANSWERS_DIR = os.path.join(_LAB3_ROOT, "lab_json")
+_LAB3_ANSWERS_FILE = os.path.join(_LAB3_ANSWERS_DIR, "lab3_form_answers.json")
+_LAB3_KEYS = [
+    "code_1", "code_2", "code_3", "code_4", "code_5",
+    "lab3_user_answer", "lab3_user_query",
+    "step_1_done", "step_2_done", "step_3_done", "step_4_done", "step_5_done",
+]
+# Don't persist placeholder so refresh shows saved code, not "TODO"
+_LAB3_CODE_PLACEHOLDER = "TODO: Add your code here"
+
+
+def _lab3_load():
+    if os.path.isfile(_LAB3_ANSWERS_FILE):
+        try:
+            with open(_LAB3_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _lab3_save():
+    data = {}
+    for k in _LAB3_KEYS:
+        if k not in st.session_state:
+            continue
+        val = st.session_state[k]
+        if not isinstance(val, (str, int, float, bool, type(None))):
+            continue
+        # Don't save code boxes when still placeholder, so refresh won't bring back "TODO"
+        if k.startswith("code_") and isinstance(val, str) and val.strip() == _LAB3_CODE_PLACEHOLDER:
+            continue
+        data[k] = val
+    try:
+        existing = {}
+        if os.path.isfile(_LAB3_ANSWERS_FILE):
+            with open(_LAB3_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            return
+        os.makedirs(_LAB3_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB3_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
 def render_text_coding_lab():
     # Initialize session state for variables if not present
     if "lab3_vars" not in st.session_state:
         st.session_state["lab3_vars"] = {}
+
+    # Load from file only when key missing (e.g. after refresh); don't overwrite user's current input
+    raw = _lab3_load()
+    for k in _LAB3_KEYS:
+        if k not in raw or k in st.session_state:
+            continue
+        val = raw[k]
+        if k.startswith("code_") and isinstance(val, str) and val.strip() == _LAB3_CODE_PLACEHOLDER:
+            continue  # don't restore placeholder, so widget can show default or user's code
+        st.session_state[k] = val
 
     # --- STEP 1 ---
     st.subheader("Step 1: The Engine")
@@ -229,6 +290,7 @@ embeddings = model.encode(texts, normalize_embeddings=True)"""  # noqa: F841
         user_answer = st.text_area(
             "Why would a search engine need to distinguish between a user's question (query) and a webpage (document)?",
             placeholder="Type your answer here...",
+            key="lab3_user_answer",
         )
 
         if user_answer:
@@ -564,7 +626,11 @@ for idx in top_k_indices:
             )
 
             st.markdown("#### Search the 5,000 Movies")
-            user_query = st.text_input("Enter a search query:", "Time travel paradox")
+            user_query = st.text_input(
+                "Enter a search query:",
+                value=st.session_state.get("lab3_user_query", "Time travel paradox"),
+                key="lab3_user_query",
+            )
 
             if user_query:
                 # 1. Embed Query (using the model you loaded!)
@@ -601,6 +667,9 @@ for idx in top_k_indices:
             st.error(
                 f"Could not load TMDB dataset. Make sure you've run `process_data.py`. Error: {e}"
             )
+
+    # Persist so refresh keeps content (no-op if unchanged)
+    _lab3_save()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,42 @@
+{
+  "form_answers": {
+    "q0_1": "2(w - 3)\n",
+    "q0_2": "10\n",
+    "q0_3": "Positive",
+    "q0_4": "Decrease",
+    "q0_5": "No",
+    "q0_6": "No",
+    "q0_7": "w = 3. The gradient is zero, so L(w) is minimized.",
+    "q1": "The optimization does not progress. The parameters stay the same and the loss does not decrease.",
+    "q2": "The optimization moves faster toward the minimum, but if the learning rate becomes too large it may overshoot the optimum.",
+    "q3_text": "The optimization becomes unstable and may diverge, causing the loss to oscillate or increase.",
+    "q4": "Increase learning rate",
+    "q5": "Increase batch size",
+    "q6": "A larger learning rate speeds up training but can cause instability or divergence. A smaller learning rate is more stable but slower. Larger batch sizes provide more stable gradients but require more memory, while smaller batch sizes are noisier but computationally cheaper.",
+    "q1_p2": "Steps get larger",
+    "q2_p2": "The direction of steepest descent (negative gradient)",
+    "q3_p2": "The optimization might diverge and never reach the minimum",
+    "q1_p4": "No",
+    "q2_p4": "The optimizer can reliably find the global minimum when the loss surface is convex or when the starting point is in the basin of attraction of the global minimum. It may get stuck in local minima or fail to converge when the loss surface is non-convex, the starting point is unfavorable, or the learning rate is too large.",
+    "q5_part5": "torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)",
+    "clipping_location": "Location C",
+    "q5_max_norm": "5.0",
+    "q5_reflection": "The gradients would be clipped too aggressively, so training would be extremely slow and might barely make progress, but it would be very stable."
+  },
+  "flags": {
+    "lab_part": 1,
+    "part1_questions_submitted": false,
+    "part2_questions_submitted": false,
+    "part3_questions_submitted": false,
+    "part4_questions_submitted": false,
+    "part5_code_submitted": false,
+    "part5_location_submitted": false,
+    "part5_questions_submitted": false,
+    "part1_completed": false,
+    "part2_completed": true,
+    "part3_completed": true,
+    "part4_completed": true,
+    "part5_code_correct": true,
+    "part0_completed": true
+  }
+}

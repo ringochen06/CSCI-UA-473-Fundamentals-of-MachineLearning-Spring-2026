@@ -3,6 +3,7 @@ Lab 2: Optimization
 
 """
 
+import json
 import os
 import sys
 import time
@@ -22,6 +23,13 @@ from labs.lab2_optimization.gradient_descent import make_theta_array
 from labs.lab2_optimization.loss_functions import doublewell_gradient, doublewell_loss
 from labs.lab2_optimization.loss_surface import GradientDescentLinearRegression
 from labs.lab2_optimization.visualization import draw_line
+
+# Must be first Streamlit command so refresh keeps wide layout
+st.set_page_config(
+    page_title="Lab 2: Downhill Descent",
+    page_icon="🏔️",
+    layout="wide",
+)
 
 if "lab_part" not in st.session_state:
     st.session_state["lab_part"] = 1
@@ -79,8 +87,87 @@ if "running" not in st.session_state:
 if "animation_speed" not in st.session_state:
     st.session_state["animation_speed"] = 0.05
 
+# Persist form answers and "submitted/passed" state so they survive refresh / restart.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_LAB_ANSWERS_DIR = os.path.join(_PROJECT_ROOT, "lab_json")
+_LAB2_ANSWERS_FILE = os.path.join(_LAB_ANSWERS_DIR, "lab2_form_answers.json")
+_LAB2_ALL_FORM_KEYS = [
+    "q0_1", "q0_2", "q0_3", "q0_4", "q0_5", "q0_6", "q0_7",
+    "q1", "q2", "q3_text", "q4", "q5", "q6",
+    "q1_p2", "q2_p2", "q3_p2",
+    "q1_p4", "q2_p4",
+    "q5_part5", "clipping_location", "q5_max_norm", "q5_reflection",
+]
+_LAB2_FLAG_KEYS = [
+    "lab_part",
+    "part1_questions_submitted",
+    "part2_questions_submitted",
+    "part3_questions_submitted",
+    "part4_questions_submitted",
+    "part5_code_submitted",
+    "part5_location_submitted",
+    "part5_questions_submitted",
+    "part1_completed",
+    "part2_completed",
+    "part3_completed",
+    "part4_completed",
+    "part5_code_correct",
+    "part0_completed",
+]
+
+
+def _load_form_answers():
+    if os.path.isfile(_LAB2_ANSWERS_FILE):
+        try:
+            with open(_LAB2_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_form_answers():
+    """Only write when data actually changed (don't overwrite on every run/refresh)."""
+    data = {
+        "form_answers": st.session_state["form_answers"],
+        "flags": {
+            k: st.session_state[k]
+            for k in _LAB2_FLAG_KEYS
+            if k in st.session_state
+            and isinstance(st.session_state[k], (bool, int, float, str))
+        },
+    }
+    try:
+        existing = {}
+        if os.path.isfile(_LAB2_ANSWERS_FILE):
+            with open(_LAB2_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            return
+        os.makedirs(_LAB_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB2_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
 if "form_answers" not in st.session_state:
     st.session_state["form_answers"] = {}
+
+# Every time page opens: load existing answers from file so they are shown
+data = _load_form_answers()
+fa = data.get("form_answers") if isinstance(data.get("form_answers"), dict) else data
+if isinstance(fa, dict):
+    for k, v in fa.items():
+        if v is not None and v != "":
+            st.session_state["form_answers"][k] = v
+for k, v in data.get("flags", {}).items():
+    if k in _LAB2_FLAG_KEYS:
+        st.session_state[k] = v
+saved = st.session_state["form_answers"]
+for key in _LAB2_ALL_FORM_KEYS:
+    if key in saved and saved[key] is not None and saved[key] != "":
+        st.session_state[key] = saved[key]
 
 if "part1_questions_submitted" not in st.session_state:
     st.session_state["part1_questions_submitted"] = False
@@ -99,6 +186,9 @@ if "part5_questions_submitted" not in st.session_state:
 if "part5_code_correct" not in st.session_state:
     st.session_state["part5_code_correct"] = False
 
+# Persist current state every run so refresh keeps progress and lab_part
+_save_form_answers()
+
 
 def restore_form_keys(keys):
     saved = st.session_state["form_answers"]
@@ -115,7 +205,11 @@ def stash_form_keys(keys):
     saved = st.session_state["form_answers"]
     for key in keys:
         if key in st.session_state:
-            saved[key] = st.session_state[key]
+            val = st.session_state[key]
+            # Only persist JSON-serializable values; new value overwrites old
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                saved[key] = val
+    _save_form_answers()
 
 
 def mark_part1_submitted():
@@ -157,6 +251,8 @@ def update_part2():
     batch = st.session_state["part2_batch"]
     degree = st.session_state["part2_degree"]
     pts_train = len(df_train)
+    part2_rng = st.session_state["part2"]["rng"]
+    part2_max_updates = st.session_state["part1"]["max_updates"]
 
     create_batched_indices(pts_train, batch, part2_max_updates, part2_rng)
     init_theta = np.full(degree + 1, 0.001)
@@ -197,6 +293,7 @@ if os.environ.get("ST_DEV_MODE"):
         )
         if selected_part != st.session_state["lab_part"]:
             st.session_state["lab_part"] = selected_part
+            _save_form_answers()
             st.rerun()
 
 
@@ -283,61 +380,67 @@ if st.session_state["lab_part"] == 1:
     chart = (curve + tangent + point + slope_label).properties(height=350)
     st.altair_chart(chart, use_container_width=True)
 
-    if not st.session_state.get("part1_questions_submitted", False):
-        restore_form_keys(
-            [
-                "q0_1",
-                "q0_2",
-                "q0_3",
-                "q0_4",
-                "q0_5",
-                "q0_6",
-                "q0_7",
-            ]
-        )
+    restore_form_keys(
+        [
+            "q0_1",
+            "q0_2",
+            "q0_3",
+            "q0_4",
+            "q0_5",
+            "q0_6",
+            "q0_7",
+        ]
+    )
     with st.form("part1_questions"):
         q0_1 = st.text_area(
             "Q1: What is the gradient ∂L/∂w? (Hint: Derive from the formula for L(w)",
+            value=st.session_state.get("q0_1") or "",
             key="q0_1",
             height=100,
         )
 
         q0_2 = st.text_area(
             "Q2: What is the gradient ∂L/∂w at w = 8?",
+            value=st.session_state.get("q0_2") or "",
             key="q0_2",
             height=60,
         )
 
+        _q0_3_val = st.session_state.get("q0_3")
         q0_3 = st.radio(
             "Q3: What is the sign of the gradient at w = 8?",
             ["Positive", "Negative"],
             key="q0_3",
-            index=None,
+            index=0 if _q0_3_val == "Positive" else (1 if _q0_3_val == "Negative" else None),
         )
 
+        _q0_4_val = st.session_state.get("q0_4")
         q0_4 = st.radio(
             "Q4: At w = 8, should we increase or decrease our estimate of w?",
             ["Increase", "Decrease"],
             key="q0_4",
-            index=None,
+            index=0 if _q0_4_val == "Increase" else (1 if _q0_4_val == "Decrease" else None),
         )
 
+        _q0_5_val = st.session_state.get("q0_5")
         q0_5 = st.radio(
             "Q5: Is the gradient at w = -1 the same direction as at w = 8?",
             ["Yes", "No"],
             key="q0_5",
-            index=None,
+            index=0 if _q0_5_val == "Yes" else (1 if _q0_5_val == "No" else None),
         )
 
+        _q0_6_val = st.session_state.get("q0_6")
         q0_6 = st.radio(
             "Q6: Is the gradient at w = -1 the same magnitude as at w = 8?",
             ["Yes", "No"],
             key="q0_6",
-            index=None,
+            index=0 if _q0_6_val == "Yes" else (1 if _q0_6_val == "No" else None),
         )
 
         q0_7 = st.text_area(
             "Q7: When would the gradient be 0 (what value of w)? What does this tell us about L(w) at this point?",
+            value=st.session_state.get("q0_7") or "",
             key="q0_7",
             height=80,
         )
@@ -417,6 +520,7 @@ if st.session_state["lab_part"] == 1:
                     and correct_q0_7
                 ):
                     st.session_state["part0_completed"] = True
+                    _save_form_answers()
                     st.success("🎉 You're ready for the slopes!")
                 else:
                     st.session_state["part0_completed"] = False
@@ -449,6 +553,7 @@ if st.session_state["lab_part"] == 1:
             "Continue to Part 2 →", use_container_width=True, key="continue_to_part2"
         ):
             st.session_state["lab_part"] = 2
+            _save_form_answers()
             st.rerun()
 
 
@@ -1075,8 +1180,7 @@ update_fn(step)
 if st.session_state["lab_part"] == 2:
     st.subheader("Questions")
 
-    if not st.session_state.get("part2_questions_submitted", False):
-        restore_form_keys(["q1", "q2", "q3_text", "q4", "q5", "q6"])
+    restore_form_keys(["q1", "q2", "q3_text", "q4", "q5", "q6"])
     with st.form("part2_questions"):
         q1 = st.text_area(
             "1) Set the learning rate to 0. How does this affect the optimization?",
@@ -1138,6 +1242,7 @@ if st.session_state["lab_part"] == 2:
 
                 if correct_q4 and correct_q5:
                     st.session_state["part2_completed"] = True
+                    _save_form_answers()
                     st.success("Great job! Part 3 unlocked.")
                     st.info(
                         "**Key Insights:**\n\n"
@@ -1170,6 +1275,7 @@ if st.session_state["lab_part"] == 2:
             "← Back to Part 1", use_container_width=True, key="back_to_part0_p1"
         ):
             st.session_state["lab_part"] = 1
+            _save_form_answers()
             st.rerun()
     with col2:
         if st.session_state.get("part2_completed", False):
@@ -1179,13 +1285,13 @@ if st.session_state["lab_part"] == 2:
                 key="continue_to_part3",
             ):
                 st.session_state["lab_part"] = 3
+                _save_form_answers()
                 st.rerun()
 
 elif st.session_state["lab_part"] == 3:
     st.subheader("Questions")
 
-    if not st.session_state.get("part3_questions_submitted", False):
-        restore_form_keys(["q1_p2", "q2_p2", "q3_p2"])
+    restore_form_keys(["q1_p2", "q2_p2", "q3_p2"])
     with st.form("part3_questions"):
         q1_p2 = st.radio(
             "Q1: As you increase the learning rate, what happens to the path on the loss surface?",
@@ -1243,6 +1349,7 @@ elif st.session_state["lab_part"] == 3:
 
                 if correct_answers and loss_below_3:
                     st.session_state["part3_completed"] = True
+                    _save_form_answers()
                     st.success("Great job! Part 4 unlocked.")
                 elif correct_answers and not loss_below_3:
                     st.session_state["part3_completed"] = False
@@ -1266,6 +1373,7 @@ elif st.session_state["lab_part"] == 3:
             "← Back to Part 2", use_container_width=True, key="back_to_part1_p2"
         ):
             st.session_state["lab_part"] = 2
+            _save_form_answers()
             st.rerun()
     with col2:
         if st.session_state.get("part3_completed", False):
@@ -1275,13 +1383,13 @@ elif st.session_state["lab_part"] == 3:
                 key="continue_to_part4",
             ):
                 st.session_state["lab_part"] = 4
+                _save_form_answers()
                 st.rerun()
 
 elif st.session_state["lab_part"] == 4:
     st.subheader("Questions")
 
-    if not st.session_state.get("part4_questions_submitted", False):
-        restore_form_keys(["q1_p4", "q2_p4"])
+    restore_form_keys(["q1_p4", "q2_p4"])
     with st.form("part4_questions"):
         q1_p4 = st.radio(
             "Q1: Keeping the initial position the same (1.5, 1), change the learning rate. Are you able to get to the true global minimum with the given range of learning rates?",
@@ -1322,6 +1430,7 @@ elif st.session_state["lab_part"] == 4:
 
             if correct_q1 and correct_q2:
                 st.session_state["part4_completed"] = True
+                _save_form_answers()
                 st.success("Great work! Part 5 unlocked.")
             else:
                 st.session_state["part4_completed"] = False
@@ -1343,11 +1452,13 @@ elif st.session_state["lab_part"] == 4:
             "← Back to Part 3", use_container_width=True, key="back_to_part2_p3"
         ):
             st.session_state["lab_part"] = 3
+            _save_form_answers()
             st.rerun()
     with col2:
         if st.session_state.get("part4_completed", False):
             if st.button("Part 5 →", use_container_width=True, key="continue_to_part5"):
                 st.session_state["lab_part"] = 5
+                _save_form_answers()
                 st.rerun()
 
 elif st.session_state["lab_part"] == 5:
@@ -1406,8 +1517,7 @@ elif st.session_state["lab_part"] == 5:
     losses_no_clip_truncated = clipping_results["losses_no_clip_truncated"]
     losses_with_clip_truncated = clipping_results["losses_with_clip_truncated"]
 
-    if not st.session_state.get("part5_code_submitted", False):
-        restore_form_keys(["q5_part5"])
+    restore_form_keys(["q5_part5"])
     with st.form("part5_code_submission"):
         q5_answer = st.text_area(
             "What ONE line of code would you add to prevent exploding gradients? (Write just the code line, no comments)",
@@ -1452,6 +1562,7 @@ elif st.session_state["lab_part"] == 5:
 
                 if answer_normalized in normalized_patterns:
                     st.session_state["part5_code_correct"] = True
+                    _save_form_answers()
                     st.success("🎉 You've got it!")
                 else:
                     st.session_state["part5_code_correct"] = False
@@ -1479,8 +1590,13 @@ elif st.session_state["lab_part"] == 5:
 
     st.session_state["part5_code_submitted"] = False
 
-    if not st.session_state.get("part5_location_submitted", False):
+    # Only restore location when correct; if saved answer was wrong, clear so user can change selection
+    saved_loc = st.session_state["form_answers"].get("clipping_location")
+    if saved_loc == "Location C":
         restore_form_keys(["clipping_location"])
+    elif saved_loc in ("Location A", "Location B", "Location D"):
+        if "clipping_location" in st.session_state:
+            del st.session_state["clipping_location"]
     with st.form("gradient_clipping_location"):
         location_q = st.radio(
             "Which location should this line be placed? Look carefully through the comments.",
@@ -1491,6 +1607,7 @@ elif st.session_state["lab_part"] == 5:
                 "Location D",
             ],
             key="clipping_location",
+            index=None,  # no default so they can pick again after wrong answer
         )
 
         submitted_location = st.form_submit_button(
@@ -1566,8 +1683,7 @@ elif st.session_state["lab_part"] == 5:
 
     st.markdown("### Questions")
 
-    if not st.session_state.get("part5_questions_submitted", False):
-        restore_form_keys(["q5_max_norm", "q5_reflection"])
+    restore_form_keys(["q5_max_norm", "q5_reflection"])
     with st.form("part5_questions"):
         q5_max_norm = st.text_input(
             "1) What is the maximum a gradient can be with this clipping?",
@@ -1647,6 +1763,7 @@ elif st.session_state["lab_part"] == 5:
     with col1:
         if st.button("← Back to Part 4", use_container_width=True, key="back_to_part4"):
             st.session_state["lab_part"] = 4
+            _save_form_answers()
             st.rerun()
     with col2:
         st.write("")

@@ -1,0 +1,221 @@
+{
+  "boss_code_10": "def is_basis(vectors):\n    M = torch.vstack(vectors)\n    return torch.linalg.matrix_rank(M) == M.shape[0] == M.shape[1]",
+  "ev_questions_solved": true,
+  "last_roll": 0,
+  "saved_frq_0": "Setting a seed ensures reproducibility, so the same random numbers are generated each time an experiment runs.",
+  "hp": 100,
+  "xp": 600,
+  "merchant_count": 2,
+  "boss_code_9": "def weighted_ip(x, y, W):\n    return x.T @ W @ y",
+  "rng_offset": 0,
+  "boss_9_solved": true,
+  "merchant_dice_rolled": false,
+  "boss_8_solved": true,
+  "dungeon_map": {
+    "__tensor__": true,
+    "data": [
+      [
+        42,
+        67,
+        76,
+        14,
+        26,
+        35,
+        20,
+        24,
+        50,
+        13
+      ],
+      [
+        78,
+        14,
+        10,
+        54,
+        31,
+        72,
+        15,
+        95,
+        67,
+        6
+      ],
+      [
+        49,
+        76,
+        73,
+        11,
+        99,
+        13,
+        41,
+        69,
+        87,
+        19
+      ],
+      [
+        72,
+        80,
+        75,
+        29,
+        33,
+        64,
+        39,
+        76,
+        32,
+        10
+      ],
+      [
+        86,
+        22,
+        77,
+        19,
+        7,
+        23,
+        43,
+        94,
+        93,
+        77
+      ],
+      [
+        70,
+        9,
+        70,
+        39,
+        86,
+        99,
+        15,
+        84,
+        78,
+        8
+      ],
+      [
+        66,
+        30,
+        40,
+        60,
+        70,
+        61,
+        23,
+        20,
+        11,
+        61
+      ],
+      [
+        77,
+        89,
+        84,
+        53,
+        48,
+        9,
+        83,
+        7,
+        58,
+        91
+      ],
+      [
+        14,
+        91,
+        36,
+        3,
+        82,
+        90,
+        89,
+        28,
+        55,
+        33
+      ],
+      [
+        27,
+        47,
+        65,
+        89,
+        41,
+        45,
+        61,
+        39,
+        61,
+        64
+      ]
+    ],
+    "dtype": "int64",
+    "device": "cpu"
+  },
+  "dice_count": 0,
+  "logs": [
+    "\ud83c\udd99 Cleared Floor 5! +50 Gold",
+    "\ud83d\udcb0 Correct Answer! +10 Gold",
+    "\ud83c\udd99 Cleared Floor 4! +50 Gold",
+    "\ud83d\udcb0 Correct Answer! +10 Gold",
+    "\ud83c\udd99 Cleared Floor 3! +50 Gold",
+    "\ud83c\udd99 Cleared Floor 2! +50 Gold",
+    "\ud83d\udcb0 Correct Answer! +10 Gold",
+    "\ud83c\udd99 Cleared Floor 1! +50 Gold",
+    "\ud83d\udcb0 Correct Answer! +10 Gold",
+    "\ud83c\udd99 Cleared Floor 0! +50 Gold",
+    "\ud83d\udcb0 Correct Answer! +10 Gold",
+    "\u2139\ufe0f Hero Ringo entered with Seed 42.",
+    "Welcome to the Tensor Dungeon. Prepare yourself."
+  ],
+  "gold": 350,
+  "boss_10_solved": true,
+  "saved_frq_5": "No, matrix multiplication is not commutative. In general, A@B is not the same as B@A.",
+  "saved_frq_4": "(2,2,2); (1,1,2)",
+  "boss_11_solved": true,
+  "tensor_x": {
+    "__tensor__": true,
+    "data": [
+      [
+        1.0,
+        1.0,
+        1.0
+      ],
+      [
+        1.0,
+        1.0,
+        1.0
+      ],
+      [
+        1.0,
+        1.0,
+        1.0
+      ],
+      [
+        1.0,
+        1.0,
+        1.0
+      ],
+      [
+        1.0,
+        1.0,
+        1.0
+      ]
+    ],
+    "dtype": "float32",
+    "device": "cpu"
+  },
+  "saved_frq_2": "Check the tensor shape using print(x.shape), and ensure it matches (N, C, H, W). If needed, reorder dimensions using permute() or add a batch dimension using unsqueeze().",
+  "magic_number": 42,
+  "boss_7_solved": true,
+  "in_shop": false,
+  "player_name": "Ringo",
+  "saved_frq_3": "The bug could be caused by incorrect indexing or shape differences. Sometimes the tensor may have different dimensions, causing indexing errors.",
+  "revival_count": 0,
+  "inventory": [],
+  "level_complete": false,
+  "saved_frq_1": "torch.from_numpy(array)",
+  "answered_mcqs": {
+    "__type__": "set",
+    "data": [
+      "mcq_1",
+      "mcq_0",
+      "mcq_5",
+      "mcq_4",
+      "mcq_2"
+    ]
+  },
+  "shop_available": false,
+  "prob_question_solved": true,
+  "boss_6_solved": true,
+  "boss_code_11": "def get_coordinates(v, B):\n    return torch.inverse(B) @ v",
+  "level": 6,
+  "game_started": true,
+  "max_hp": 100
+}

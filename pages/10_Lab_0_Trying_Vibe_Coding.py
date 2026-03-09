@@ -5,6 +5,7 @@ This lab sets up uv environment and introduces vibe coding with antigravity.
 Students will run the streamlit app, try vibe code with antigravity, and try to debug the code.
 """
 
+import json
 import os
 from datetime import datetime
 
@@ -27,7 +28,83 @@ st.set_page_config(
 # ========================================================================
 # CONSTANTS & PATHS
 # ========================================================================
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAB_DIR = os.path.join("labs", "lab0_trying_vibe_coding")
+
+_LAB_ANSWERS_DIR = os.path.join(_PROJECT_ROOT, "lab_json")
+_LAB0_ANSWERS_FILE = os.path.join(_LAB_ANSWERS_DIR, "lab0_form_answers.json")
+
+
+def _load_form_answers():
+    if os.path.isfile(_LAB0_ANSWERS_FILE):
+        try:
+            with open(_LAB0_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_form_answers():
+    """Only write Lab 0 keys when data actually changed (don't overwrite on every run/refresh)."""
+    data = {}
+    for key in _LAB0_KEYS:
+        if key in st.session_state:
+            val = st.session_state[key]
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                data[key] = val
+    try:
+        existing = {}
+        if os.path.isfile(_LAB0_ANSWERS_FILE):
+            with open(_LAB0_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            return
+        os.makedirs(_LAB_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB0_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+_LAB0_KEYS = ["engineer_diff", "lab0_q2", "puzzle_1", "puzzle_2"]
+_LAB0_SESSION_KEY = "form_answers_lab0"
+
+if _LAB0_SESSION_KEY not in st.session_state:
+    st.session_state[_LAB0_SESSION_KEY] = {}
+
+# Every time page opens: load existing answers from file so they are shown
+raw = _load_form_answers()
+for k in _LAB0_KEYS:
+    if k in raw:
+        st.session_state[_LAB0_SESSION_KEY][k] = raw[k]
+
+
+def _restore():
+    saved = st.session_state[_LAB0_SESSION_KEY]
+    for key in _LAB0_KEYS:
+        if key in saved and (
+            key not in st.session_state
+            or st.session_state.get(key) is None
+            or st.session_state.get(key) == ""
+        ):
+            st.session_state[key] = saved[key]
+
+
+def _stash():
+    saved = st.session_state[_LAB0_SESSION_KEY]
+    for key in _LAB0_KEYS:
+        if key in st.session_state:
+            val = st.session_state[key]
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                saved[key] = val
+    _save_form_answers()
+
+
+# Apply file data to widget keys so form shows existing answers
+_restore()
+# Persist current inputs when changed (no-op if unchanged)
+_stash()
 
 # ========================================================================
 # PAGE HEADER
@@ -61,7 +138,6 @@ else:
 
 
 st.markdown("### Be a cracked engineer!")
-
 
 st.image(
     "data/media/images/engineers.png",
@@ -146,7 +222,10 @@ with st.expander("What are those Red and Green lines? (Click to learn)"):
         """
     )
 
-response = st.text_area("**Q2.** What do you think is wrong with this code?")
+response = st.text_area(
+    "**Q2.** What do you think is wrong with this code?",
+    key="lab0_q2",
+)
 
 if not response:
     st.info("Please enter your thoughts above to proceed.")

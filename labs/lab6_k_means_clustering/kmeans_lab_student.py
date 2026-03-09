@@ -21,7 +21,6 @@ from labs.lab6_k_means_clustering.level_checks import (
     check_step_4_embedding_clustering,
 )
 
-
 def _st_image_full_width(path):
     """st.image() wrapper that works across Streamlit versions."""
     try:
@@ -120,6 +119,61 @@ _COLUMN_DESCRIPTIONS = {
 }
 
 
+# ----------------------------------------------------------------------
+# Persistence: save small Lab 6 state to lab_json/lab6_form_answers.json
+# ----------------------------------------------------------------------
+_LAB6_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_LAB6_ANSWERS_DIR = os.path.join(_LAB6_ROOT, "lab_json")
+_LAB6_ANSWERS_FILE = os.path.join(_LAB6_ANSWERS_DIR, "lab6_form_answers.json")
+
+
+def _lab6_load():
+    if os.path.isfile(_LAB6_ANSWERS_FILE):
+        try:
+            with open(_LAB6_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _lab6_save():
+    # Only persist simple lab6 keys (choices, code strings, step flags); never button keys
+    data = {}
+    for key, val in st.session_state.items():
+        if not isinstance(key, str) or not key.startswith("lab6_"):
+            continue
+        if key.startswith("lab6_apply_"):
+            continue  # button keys: Streamlit controls these
+        if isinstance(val, (str, int, float, bool, type(None))):
+            data[key] = val
+    # Also persist main code boxes and bonus answer so they survive refresh
+    for extra_key in [
+        "kmeans_manual_code",
+        "kmeans_sklearn_code",
+        "kmeans_elbow_code",
+        "kmeans_emb_code",
+        "bonus_q_kmeans",
+    ]:
+        if extra_key in st.session_state and isinstance(
+            st.session_state[extra_key], (str, int, float, bool, type(None))
+        ):
+            data[extra_key] = st.session_state[extra_key]
+    try:
+        existing = {}
+        if os.path.isfile(_LAB6_ANSWERS_FILE):
+            with open(_LAB6_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            return
+        os.makedirs(_LAB6_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB6_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        # Persistence should never break the lab
+        pass
+
+
 def _get_column_mapping(dataset_choice, df_columns):
     """Show a column-mapping UI and return the resolved config.
 
@@ -189,6 +243,27 @@ def _get_column_mapping(dataset_choice, df_columns):
 def render_kmeans_lab():
     st.header("Lab 6: K-Means Clustering")
 
+    # Load from file only when key missing (e.g. after refresh); don't overwrite user's current input
+    raw = _lab6_load()
+    for key, val in raw.items():
+        if not isinstance(key, str) or not key.startswith("lab6_"):
+            continue
+        if key.startswith("lab6_apply_"):
+            continue  # button keys: must not assign via session_state
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+    # Restore main code boxes and bonus answer if present in file and missing in session
+    for extra_key in [
+        "kmeans_manual_code",
+        "kmeans_sklearn_code",
+        "kmeans_elbow_code",
+        "kmeans_emb_code",
+        "bonus_q_kmeans",
+    ]:
+        if extra_key in raw and extra_key not in st.session_state:
+            st.session_state[extra_key] = raw[extra_key]
+
     st.markdown(
         """
     ### 🎯 The Mission
@@ -228,6 +303,9 @@ def render_kmeans_lab():
 
     with tab4:
         render_step_4_embeddings()
+
+    # Persist so refresh keeps lab6 choices, code, and step flags (no-op if unchanged)
+    _lab6_save()
 
 
 # ── Shared helpers: animation + metrics ──────────────────────────
@@ -858,9 +936,11 @@ for iteration in range(max_iters):
 print(f"Final centroids:\\n{centroids}")
 print(f"Cluster sizes: {[int((labels == j).sum()) for j in range(k)]}")"""
 
+    manual_default = st.session_state.get("kmeans_manual_code", default_code)
     code = st.text_area(
-        "K-Means Code:", value=default_code, height=380, key="kmeans_manual_code"
+        "K-Means Code:", value=manual_default, height=380
     )
+    st.session_state["kmeans_manual_code"] = code
 
     if st.button("Run K-Means", key="run_manual_kmeans"):
         ctx = {"data": data_2d, "np": np, "__builtins__": __builtins__}
@@ -944,9 +1024,11 @@ from sklearn.cluster import KMeans
 print(f"Inertia (sum of squared distances): {kmeans.inertia_:.2f}")
 print(f"Cluster sizes: {[int((sk_labels == j).sum()) for j in range(5)]}")"""
 
+    skl_default = st.session_state.get("kmeans_sklearn_code", default_code)
     code = st.text_area(
-        "scikit-learn Code:", value=default_code, height=250, key="kmeans_sklearn_code"
+        "scikit-learn Code:", value=skl_default, height=250
     )
+    st.session_state["kmeans_sklearn_code"] = code
 
     if st.button("Run scikit-learn KMeans", key="run_sklearn_kmeans"):
         ctx = {"data": data_2d, "np": np, "__builtins__": __builtins__}
@@ -1115,9 +1197,11 @@ inertias = []
 
 """
 
+    elbow_default = st.session_state.get("kmeans_elbow_code", default_code)
     code = st.text_area(
-        "Elbow Method Code:", value=default_code, height=250, key="kmeans_elbow_code"
+        "Elbow Method Code:", value=elbow_default, height=250
     )
+    st.session_state["kmeans_elbow_code"] = code
 
     if st.button("Run Elbow Method", key="run_elbow"):
         ctx = {"data": data_2d, "np": np, "__builtins__": __builtins__}
@@ -1144,7 +1228,12 @@ inertias = []
             else:
                 st.error(msg)
 
-    if st.session_state.get("lab6_step_3_done"):
+    # Only render plots when we have complete cached results
+    if (
+        st.session_state.get("lab6_step_3_done")
+        and "lab6_inertias" in st.session_state
+        and "lab6_k_range" in st.session_state
+    ):
         st.markdown("---")
         st.markdown("### 📉 Elbow Plot with Silhouette Score")
 
@@ -1625,12 +1714,13 @@ print(f"Inertia: {{emb_kmeans.inertia_:.2f}}")
 for j in range(k):
     print(f"  Cluster {{j}}: {{int((emb_labels == j).sum())}} items")"""
 
+    emb_default = st.session_state.get("kmeans_emb_code", default_code)
     code = st.text_area(
         "Embedding Clustering Code:",
-        value=default_code,
+        value=emb_default,
         height=280,
-        key="kmeans_emb_code",
     )
+    st.session_state["kmeans_emb_code"] = code
 
     if st.button("Run Embedding Clustering", key="run_emb_cluster"):
         ctx = {"embeddings": embeddings, "np": np, "__builtins__": __builtins__}
@@ -1869,7 +1959,9 @@ for j in range(k):
         "*(Hint: think about the next topic in the syllabus)*"
     )
 
-    answer = st.text_area("Type your answer here:", key="bonus_q_kmeans", height=100)
+    bonus_default = st.session_state.get("bonus_q_kmeans", "")
+    answer = st.text_area("Type your answer here:", value=bonus_default, height=100)
+    st.session_state["bonus_q_kmeans"] = answer
     if answer:
         st.info("Great thinking! Discuss your answer with your classmates or TA.")
 

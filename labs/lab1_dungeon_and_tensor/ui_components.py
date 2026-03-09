@@ -4,7 +4,6 @@ import seaborn as sns
 import streamlit as st
 import torch
 from matplotlib.colors import ListedColormap
-from streamlit_monaco import st_monaco
 
 from utils.security import safe_exec
 
@@ -150,11 +149,15 @@ def render_boss_level(
         st.markdown(description)
 
     st.markdown("**Your Code:**")
-    code = st_monaco(
-        value=default_code,
-        height=height,
-        language="python",
-        theme="vs-dark",
+    code_key = f"boss_code_{level_id}"
+    if code_key not in st.session_state:
+        st.session_state[code_key] = default_code
+    code = st.text_area(
+        "Code",
+        value=st.session_state[code_key],
+        height=220,
+        key=code_key,
+        label_visibility="collapsed",
     )
 
     key_btn = f"btn_{level_id}"
@@ -438,11 +441,16 @@ def render_level(curr_level_id, lvl_data):
             st.caption("Note: `torch` and `np` (numpy) are already imported for you.")
 
             st.markdown(f"**{st.session_state.player_name}'s Code:**")
-            code_input = st_monaco(
-                value=lvl_data["starter_code"],
-                height="200px",
-                language="python",
-                theme="vs-dark",
+            code_key = f"code_{curr_level_id}"
+            # Use text_area so the code box is reliably editable (st_monaco often resets on rerun)
+            if code_key not in st.session_state:
+                st.session_state[code_key] = lvl_data["starter_code"]
+            code_input = st.text_area(
+                "Code",
+                value=st.session_state[code_key],
+                height=220,
+                key=code_key,
+                label_visibility="collapsed",
             )
 
             if st.button("Run Rune ⚡"):
