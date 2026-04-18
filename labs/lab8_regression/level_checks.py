@@ -31,7 +31,10 @@ def check_step_0_explore(local_vars):
 
     skew = stats["skewness"]
     if not isinstance(skew, (int, float)):
-        return False, f"`stats['skewness']` should be a number, got {type(skew).__name__}."
+        return (
+            False,
+            f"`stats['skewness']` should be a number, got {type(skew).__name__}.",
+        )
 
     if abs(skew) < 1.0:
         return (
@@ -66,7 +69,10 @@ def check_step_1_load(local_vars):
         return False, f"⚠️ `X` should be 2-D, got {X.ndim}-D."
 
     if X.shape[1] != expected_dim:
-        return False, f"⚠️ `X` should have {expected_dim} columns (embedding dim), got {X.shape[1]}."
+        return (
+            False,
+            f"⚠️ `X` should have {expected_dim} columns (embedding dim), got {X.shape[1]}.",
+        )
 
     if y.ndim != 1:
         return False, f"⚠️ `y` should be 1-D, got {y.ndim}-D."
@@ -84,7 +90,10 @@ def check_step_1_load(local_vars):
         )
 
     if np.any(y < 0):
-        return False, "⚠️ `y` contains negative values. Did you apply `np.log1p` to price?"
+        return (
+            False,
+            "⚠️ `y` contains negative values. Did you apply `np.log1p` to price?",
+        )
 
     return True, "✅ Data loaded! X and y are ready for modeling."
 
@@ -324,17 +333,43 @@ def check_step_7_sqr(local_vars):
             f"⚠️ Length mismatch: train has {len(train_losses)}, val has {len(val_losses)}.",
         )
 
-    if train_losses[-1] > train_losses[0] * 0.95:
-        return False, "⚠️ SQR loss didn't decrease."
+    first, last = float(train_losses[0]), float(train_losses[-1])
+    if not (np.isfinite(first) and np.isfinite(last)):
+        return False, "⚠️ Non-finite SQR loss values."
+
+    # Any clear decrease is enough (old 5%-drop rule failed on Joint / 1152-d plateaus)
+    if last >= first:
+        return (
+            False,
+            "⚠️ Final SQR loss is not below initial — check training loop / lr.",
+        )
+
+    emb_dim = int(local_vars.get("EMB_DIM", 768))
+    X_test_t = local_vars.get("X_test_t")
+    if X_test_t is None:
+        return False, "⚠️ `X_test_t` not found. Run Step 3 first."
+    if int(X_test_t.shape[1]) != emb_dim:
+        return (
+            False,
+            f"⚠️ `X_test_t` has {X_test_t.shape[1]} features but EMB_DIM is {emb_dim}. "
+            "Re-run Steps 1–3 for this embedding type, and ensure SQR's first layer uses EMB_DIM.",
+        )
 
     # Check quantile ordering on the actual training data
     model_sqr = local_vars["model_sqr"]
     model_sqr.eval()
-    X_test_t = local_vars.get("X_test_t")
-    if X_test_t is None:
-        return False, "⚠️ `X_test_t` not found. Run the data split step first."
-    with torch.no_grad():
-        preds = model_sqr(X_test_t)  # (N, Q)
+    try:
+        with torch.no_grad():
+            preds = model_sqr(X_test_t)  # (N, Q)
+    except RuntimeError as e:
+        err = str(e).lower()
+        if "size" in err or "matmul" in err or "shape" in err:
+            return (
+                False,
+                f"⚠️ SQR forward failed ({e}). "
+                f"First `nn.Linear` must accept `EMB_DIM={emb_dim}` (768 text / 384 image / 1152 joint).",
+            )
+        raise
     avg_preds = preds.mean(dim=0)  # (Q,)
     diffs = avg_preds[1:] - avg_preds[:-1]
     if (diffs < 0).any():

@@ -11,6 +11,7 @@ import collections
 import io
 import json
 import math
+import os
 import random
 import sys
 import traceback
@@ -130,6 +131,107 @@ _PRE_INJECTED = {
     "ReplayBuffer": ReplayBuffer,
 }
 
+# ----------------------------------------------------------------------
+# Persistence: lab_json/lab10_form_answers.json (codes, flags, results — not lab10_vars)
+# ----------------------------------------------------------------------
+_LAB10_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+_LAB10_ANSWERS_DIR = os.path.join(_LAB10_ROOT, "lab_json")
+_LAB10_ANSWERS_FILE = os.path.join(_LAB10_ANSWERS_DIR, "lab10_form_answers.json")
+
+
+def _lab10_normalize_for_save(val):
+    """Convert numpy / nested structures to JSON-safe Python types."""
+    if isinstance(val, np.ndarray):
+        return val.tolist()
+    if isinstance(val, np.generic):
+        return val.item()
+    if isinstance(val, dict):
+        return {k: _lab10_normalize_for_save(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_lab10_normalize_for_save(x) for x in val]
+    if isinstance(val, tuple):
+        return [_lab10_normalize_for_save(x) for x in val]
+    return val
+
+
+def _lab10_is_json_serializable(val):
+    try:
+        json.dumps(val)
+        return True
+    except (TypeError, OverflowError):
+        return False
+
+
+def _lab10_load():
+    if os.path.isfile(_LAB10_ANSWERS_FILE):
+        try:
+            with open(_LAB10_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _lab10_save_snapshot_str(data: dict) -> str:
+    return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False)
+
+
+def _lab10_save():
+    data = {}
+    for key, val in st.session_state.items():
+        if not isinstance(key, str) or not key.startswith("lab10_"):
+            continue
+        if key == "lab10_vars":
+            continue
+        if key.startswith("lab10_run_"):
+            continue
+        if key == "lab10_dqn_replay_states":
+            continue
+        norm = _lab10_normalize_for_save(val)
+        if _lab10_is_json_serializable(norm):
+            data[key] = norm
+    try:
+        snap = _lab10_save_snapshot_str(data)
+        if st.session_state.get("_lab10_json_cache") == snap:
+            return
+        existing = {}
+        if os.path.isfile(_LAB10_ANSWERS_FILE):
+            with open(_LAB10_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            st.session_state["_lab10_json_cache"] = snap
+            return
+        os.makedirs(_LAB10_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB10_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        st.session_state["_lab10_json_cache"] = snap
+    except OSError:
+        pass
+
+
+def _lab10_monaco_value(key, default_code):
+    v = st.session_state.get(key)
+    if isinstance(v, str) and v.strip():
+        return v
+    return default_code
+
+
+def _lab10_sync_monaco_code(key, code):
+    """Write Monaco output to session; empty from off-screen editors must not wipe saved code."""
+    if not isinstance(code, str):
+        return
+    prev = st.session_state.get(key, "")
+    if code.strip():
+        if st.session_state.get(key) != code:
+            st.session_state[key] = code
+        return
+    if isinstance(prev, str) and prev.strip():
+        return
+    if st.session_state.get(key) != code:
+        st.session_state[key] = code
+
 
 def _exec_with_capture(code, local_vars):
     """Execute code, capturing stdout. Returns (output_str, traceback_str_or_None)."""
@@ -159,6 +261,7 @@ def _run_and_save(step_key, code, local_vars, check_fn, spinner_msg="Running..."
         result["msg"] = msg
 
     st.session_state[step_key] = result
+    _lab10_save()
     return result
 
 
@@ -519,8 +622,13 @@ print(f"V at (1,0) obstacle:             {V[1, 0]:.3f}")"""
 
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code, height="400px", language="python", theme="vs-dark"
+        value=_lab10_monaco_value("lab10_step_0_code", default_code),
+        height="400px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab10_sync_monaco_code("lab10_step_0_code", code)
+    code = _lab10_monaco_value("lab10_step_0_code", default_code)
 
     if st.button("Run Step 0", key="lab10_run_0"):
         st.session_state["lab10_vars"] = dict(_PRE_INJECTED)
@@ -693,8 +801,13 @@ print(f"Mean return (last 500 eps): {np.mean(episode_returns[-500:]):.2f}")"""
 
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code, height="460px", language="python", theme="vs-dark"
+        value=_lab10_monaco_value("lab10_step_1_code", default_code),
+        height="460px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab10_sync_monaco_code("lab10_step_1_code", code)
+    code = _lab10_monaco_value("lab10_step_1_code", default_code)
 
     if st.button("Run Step 1", key="lab10_run_1"):
         result = _run_and_save(
@@ -849,8 +962,13 @@ print(f"Parameters:   {sum(p.numel() for p in net.parameters()):,}")"""
 
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code, height="320px", language="python", theme="vs-dark"
+        value=_lab10_monaco_value("lab10_step_2_code", default_code),
+        height="320px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab10_sync_monaco_code("lab10_step_2_code", code)
+    code = _lab10_monaco_value("lab10_step_2_code", default_code)
 
     if st.button("Check QNetwork", key="lab10_run_2"):
         exec_vars = dict(st.session_state["lab10_vars"])
@@ -872,7 +990,8 @@ print(f"Parameters:   {sum(p.numel() for p in net.parameters()):,}")"""
 # CartPole interactive widget (HTML / JS / Canvas)
 # ======================================================================
 
-_CARTPOLE_HTML = Template(r"""
+_CARTPOLE_HTML = Template(
+    r"""
 <div style="background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;font-family:monospace;">
   <canvas id="cpCanvas" width="600" height="280"
           style="display:block;margin:0 auto;border-radius:4px;cursor:pointer;"></canvas>
@@ -1015,7 +1134,8 @@ _CARTPOLE_HTML = Template(r"""
   }
 })();
 </script>
-""")
+"""
+)
 
 
 def _cartpole_widget(mode="interactive", recorded_states=None):
@@ -1221,8 +1341,13 @@ print(f"\\nNaive final mean return (last 25 eps): {np.mean(episode_returns[-25:]
 
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code, height="560px", language="python", theme="vs-dark"
+        value=_lab10_monaco_value("lab10_step_3_code", default_code),
+        height="560px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab10_sync_monaco_code("lab10_step_3_code", code)
+    code = _lab10_monaco_value("lab10_step_3_code", default_code)
 
     if st.button("Run Naive DQN", key="lab10_run_3"):
         exec_vars = dict(st.session_state["lab10_vars"])
@@ -1258,6 +1383,7 @@ print(f"\\nNaive final mean return (last 25 eps): {np.mean(episode_returns[-25:]
                     "but this setup is still much less reliable than the stabilized version."
                 )
         st.session_state["lab10_step_3_result"] = result
+        _lab10_save()
 
     result = st.session_state.get("lab10_step_3_result")
     if result is not None:
@@ -1534,8 +1660,13 @@ print(f"\\nFinal mean return (last 50 eps): {np.mean(episode_returns[-50:]):.1f}
 
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code, height="560px", language="python", theme="vs-dark"
+        value=_lab10_monaco_value("lab10_step_4_code", default_code),
+        height="560px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab10_sync_monaco_code("lab10_step_4_code", code)
+    code = _lab10_monaco_value("lab10_step_4_code", default_code)
 
     if st.button("Run Stabilized DQN", key="lab10_run_4"):
         st.session_state.pop("lab10_dqn_replay_states", None)
@@ -1605,9 +1736,7 @@ print(f"\\nFinal mean return (last 50 eps): {np.mean(episode_returns[-50:]):.1f}
                 st.session_state["lab10_dqn_replay_states"] = replay_states
 
             st.markdown("**Watch your trained DQN agent:**")
-            _cartpole_widget(
-                "replay", st.session_state["lab10_dqn_replay_states"]
-            )
+            _cartpole_widget("replay", st.session_state["lab10_dqn_replay_states"])
 
 
 # ======================================================================
@@ -1743,6 +1872,11 @@ in a 5×5 grid and a CartPole environment.
 
 
 def render_rl_lab(show_solutions=False):
+    saved = _lab10_load()
+    for k, v in saved.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
     st.title("Lab 10: Reinforcement Learning")
     st.markdown(
         """
@@ -1782,3 +1916,5 @@ def render_rl_lab(show_solutions=False):
         _render_part_3()
     else:
         st.info("Complete Parts 1 and 2 to unlock the discussion.")
+
+    _lab10_save()

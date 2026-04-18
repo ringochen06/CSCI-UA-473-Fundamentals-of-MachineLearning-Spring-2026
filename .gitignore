@@ -213,5 +213,7 @@ __marimo__/
 data/processed/
 data/raw/
 data/posters/
+data/airbnb_images/
 
 process_airbnb.py
+process_airbnb_images.py

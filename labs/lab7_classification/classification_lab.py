@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 import traceback
@@ -337,10 +338,153 @@ def _plot_softmax_vs_sigmoid():
     return fig_class, fig_detect
 
 
+# ----------------------------------------------------------------------
+# Persistence: lab_json/lab7_form_answers.json
+# ----------------------------------------------------------------------
+_LAB7_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+_LAB7_ANSWERS_DIR = os.path.join(_LAB7_ROOT, "lab_json")
+_LAB7_ANSWERS_FILE = os.path.join(_LAB7_ANSWERS_DIR, "lab7_form_answers.json")
+
+# st.button / primary action keys cannot be assigned via st.session_state (StreamlitValueAssignmentNotAllowedError).
+# Older saves accidentally persisted them; never load or save these.
+_LAB7_NO_SESSION_ASSIGN_KEYS = frozenset(
+    {
+        "ov_cls_check",
+        "ov_temp_check",
+        "ov_det_check",
+        "ov_bce_check",
+        "run_softmax",
+        "run_cross_entropy",
+        "run_sigmoid",
+        "run_bce",
+        "run_detection",
+        "run_trading",
+        "reroll_market",
+    }
+)
+
+
+def _lab7_disallowed_key(k):
+    return isinstance(k, str) and k in _LAB7_NO_SESSION_ASSIGN_KEYS
+
+
+def _lab7_to_jsonable(v):
+    if isinstance(v, np.ndarray):
+        return v.tolist()
+    if isinstance(v, (np.floating, np.integer)):
+        return float(v) if isinstance(v, np.floating) else int(v)
+    if isinstance(v, dict):
+        return {k: _lab7_to_jsonable(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_lab7_to_jsonable(x) for x in v]
+    if isinstance(v, (str, int, float, bool, type(None))):
+        return v
+    raise TypeError(type(v))
+
+
+def _lab7_load():
+    if os.path.isfile(_LAB7_ANSWERS_FILE):
+        try:
+            with open(_LAB7_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _lab7_monaco_value(key, default_code):
+    """Use saved code only if non-empty; otherwise Monaco shows a blank editor."""
+    v = st.session_state.get(key)
+    if isinstance(v, str) and v.strip():
+        return v
+    return default_code
+
+
+def _lab7_sync_monaco_code(key, code):
+    """Write Monaco output to session. Empty string from off-screen tabs must not wipe saved code."""
+    if not isinstance(code, str):
+        return
+    prev = st.session_state.get(key, "")
+    if code.strip():
+        if st.session_state.get(key) != code:
+            st.session_state[key] = code
+        return
+    if isinstance(prev, str) and prev.strip():
+        return
+    if st.session_state.get(key) != code:
+        st.session_state[key] = code
+
+
+def _lab7_restore_numpy():
+    for key in (
+        "lab7_step4_probs",
+        "lab7_step4_targets",
+        "lab7_step5_det_probs",
+        "lab7_step5_Y_test",
+    ):
+        if key in st.session_state and isinstance(st.session_state[key], list):
+            st.session_state[key] = np.asarray(st.session_state[key], dtype=float)
+    td = st.session_state.get("lab7_step5_test_dates")
+    if isinstance(td, list):
+        try:
+            st.session_state["lab7_step5_test_dates"] = np.asarray(td)
+        except (ValueError, TypeError):
+            pass
+
+
+def _lab7_save_snapshot_str(data: dict) -> str:
+    """Stable string for comparing whether answers changed (avoids re-reading the file every rerun)."""
+    return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False)
+
+
+def _lab7_save():
+    data = {}
+    for k, v in st.session_state.items():
+        if not isinstance(k, str):
+            continue
+        if not (k.startswith("lab7_") or k.startswith("ov_") or k == "trader_name"):
+            continue
+        if k.startswith("lab7_run_"):
+            continue
+        if _lab7_disallowed_key(k):
+            continue
+        try:
+            data[k] = _lab7_to_jsonable(v)
+        except TypeError:
+            continue
+    try:
+        snap = _lab7_save_snapshot_str(data)
+        if st.session_state.get("_lab7_json_cache") == snap:
+            return
+        existing = {}
+        if os.path.isfile(_LAB7_ANSWERS_FILE):
+            with open(_LAB7_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            st.session_state["_lab7_json_cache"] = snap
+            return
+        os.makedirs(_LAB7_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB7_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        st.session_state["_lab7_json_cache"] = snap
+    except OSError:
+        pass
+
+
 # ── Main renderer ────────────────────────────────────────────────
 
 
 def render_classification_lab():
+    saved = _lab7_load()
+    for k, v in saved.items():
+        if _lab7_disallowed_key(k):
+            continue
+        if k not in st.session_state:
+            st.session_state[k] = v
+    _lab7_restore_numpy()
+
     st.header("Lab 7: The Wolf of Wall Street")
 
     st.warning(
@@ -872,6 +1016,8 @@ def render_classification_lab():
     with tab6:
         render_step_6_trading_competition()
 
+    _lab7_save()
+
 
 # ── Step 1: Softmax ──────────────────────────────────────────────
 
@@ -929,8 +1075,13 @@ print(f"  Recommendation: {actions[np.argmax(probs)]} (highest probability)")"""
     st.caption("**Inputs:** `logits` (a 1D array of K raw scores for Sell/Hold/Buy). ")
     st.markdown("**Your Code:**")
     code = st_monaco(
-        value=default_code, height="320px", language="python", theme="vs-dark"
+        value=_lab7_monaco_value("lab7_step1_code", default_code),
+        height="320px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab7_sync_monaco_code("lab7_step1_code", code)
+    code = _lab7_monaco_value("lab7_step1_code", default_code)
 
     if st.button("Run Softmax", key="run_softmax"):
         ctx = {"np": np}
@@ -1050,8 +1201,13 @@ print(f"Improvement:         {loss_uniform - loss_ours:.4f} nats")"""
     )
     st.markdown("**Your Code:**")
     code = st_monaco(
-        value=default_code, height="380px", language="python", theme="vs-dark"
+        value=_lab7_monaco_value("lab7_step2_code", default_code),
+        height="380px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab7_sync_monaco_code("lab7_step2_code", code)
+    code = _lab7_monaco_value("lab7_step2_code", default_code)
 
     if st.button("Run Cross-Entropy", key="run_cross_entropy"):
         ctx = {"np": np}
@@ -1068,17 +1224,26 @@ print(f"Improvement:         {loss_uniform - loss_ours:.4f} nats")"""
                 st.error(msg)
 
     if st.session_state.get("lab7_step_2_done"):
-        loss_ours = st.session_state["lab7_step2_loss_ours"]
-        loss_uniform = st.session_state["lab7_step2_loss_uniform"]
+        if (
+            "lab7_step2_loss_ours" not in st.session_state
+            or "lab7_step2_loss_uniform" not in st.session_state
+        ):
+            st.info(
+                "Step 2 is marked complete, but loss values are not in memory "
+                "(new session or incomplete save). Click **Run Cross-Entropy** once."
+            )
+        else:
+            loss_ours = st.session_state["lab7_step2_loss_ours"]
+            loss_uniform = st.session_state["lab7_step2_loss_uniform"]
 
-        col1, col2 = st.columns(2)
-        with col1:
-            fig = _plot_loss_comparison(loss_ours, loss_uniform)
-            st.plotly_chart(fig, use_container_width=True)
-        with col2:
-            st.markdown("### Why Cross-Entropy?")
-            st.markdown(
-                r"""
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = _plot_loss_comparison(loss_ours, loss_uniform)
+                st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                st.markdown("### Why Cross-Entropy?")
+                st.markdown(
+                    r"""
             Minimizing cross-entropy is equivalent to minimizing
             **KL divergence** between the true distribution and our model:
 
@@ -1087,45 +1252,47 @@ print(f"Improvement:         {loss_uniform - loss_ours:.4f} nats")"""
             Since the entropy of $p^\star$ doesn't depend on $\theta$, minimizing
             cross-entropy = minimizing KL divergence.
             """
+                )
+
+            # Interactive: try different logits (runs every rerun so sliders update the plot)
+            st.markdown("---")
+            st.markdown("### Experiment: Try Different Logits")
+            exp_col1, exp_col2, exp_col3 = st.columns(3)
+            with exp_col1:
+                u_sell = st.slider("u_Sell", -5.0, 5.0, 0.0, 0.5, key="exp_sell")
+            with exp_col2:
+                u_hold = st.slider("u_Hold", -5.0, 5.0, 1.0, 0.5, key="exp_hold")
+            with exp_col3:
+                u_buy = st.slider("u_Buy", -5.0, 5.0, 2.0, 0.5, key="exp_buy")
+
+            exp_logits = np.array([u_sell, u_hold, u_buy])
+            exp_shifted = exp_logits - exp_logits.max()
+            exp_probs = np.exp(exp_shifted) / np.exp(exp_shifted).sum()
+
+            target_action = st.radio(
+                "Correct action:",
+                ["Sell (0)", "Hold (1)", "Buy (2)"],
+                index=2,
+                horizontal=True,
+                key="exp_target",
             )
+            target_idx = int(target_action.split("(")[1][0])
+            exp_loss = -np.log(exp_probs[target_idx])
 
-        # Interactive: try different logits (runs every rerun so sliders update the plot)
-        st.markdown("---")
-        st.markdown("### Experiment: Try Different Logits")
-        exp_col1, exp_col2, exp_col3 = st.columns(3)
-        with exp_col1:
-            u_sell = st.slider("u_Sell", -5.0, 5.0, 0.0, 0.5, key="exp_sell")
-        with exp_col2:
-            u_hold = st.slider("u_Hold", -5.0, 5.0, 1.0, 0.5, key="exp_hold")
-        with exp_col3:
-            u_buy = st.slider("u_Buy", -5.0, 5.0, 2.0, 0.5, key="exp_buy")
-
-        exp_logits = np.array([u_sell, u_hold, u_buy])
-        exp_shifted = exp_logits - exp_logits.max()
-        exp_probs = np.exp(exp_shifted) / np.exp(exp_shifted).sum()
-
-        target_action = st.radio(
-            "Correct action:",
-            ["Sell (0)", "Hold (1)", "Buy (2)"],
-            index=2,
-            horizontal=True,
-            key="exp_target",
-        )
-        target_idx = int(target_action.split("(")[1][0])
-        exp_loss = -np.log(exp_probs[target_idx])
-
-        exp_c1, exp_c2 = st.columns(2)
-        with exp_c1:
-            fig = _plot_softmax_bars(exp_probs, ["Sell", "Hold", "Buy"], "Your Softmax")
-            st.plotly_chart(fig, use_container_width=True)
-        with exp_c2:
-            st.metric("Cross-Entropy Loss", f"{exp_loss:.4f}")
-            st.metric("P(correct action)", f"{exp_probs[target_idx]:.4f}")
-            actions = ["Sell", "Hold", "Buy"]
-            st.caption(
-                f"Target: **{actions[target_idx]}** | "
-                f"Predicted: **{actions[np.argmax(exp_probs)]}**"
-            )
+            exp_c1, exp_c2 = st.columns(2)
+            with exp_c1:
+                fig = _plot_softmax_bars(
+                    exp_probs, ["Sell", "Hold", "Buy"], "Your Softmax"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            with exp_c2:
+                st.metric("Cross-Entropy Loss", f"{exp_loss:.4f}")
+                st.metric("P(correct action)", f"{exp_probs[target_idx]:.4f}")
+                actions = ["Sell", "Hold", "Buy"]
+                st.caption(
+                    f"Target: **{actions[target_idx]}** | "
+                    f"Predicted: **{actions[np.argmax(exp_probs)]}**"
+                )
 
 
 # ── Step 3: Sigmoid & Detection ──────────────────────────────────
@@ -1203,8 +1370,13 @@ print("(Does NOT need to sum to 1 -- signals are independent!)")"""
     )
     st.markdown("**Your Code:**")
     code = st_monaco(
-        value=default_code, height="320px", language="python", theme="vs-dark"
+        value=_lab7_monaco_value("lab7_step3_code", default_code),
+        height="320px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab7_sync_monaco_code("lab7_step3_code", code)
+    code = _lab7_monaco_value("lab7_step3_code", default_code)
 
     if st.button("Run Sigmoid", key="run_sigmoid"):
         ctx = {"np": np}
@@ -1350,8 +1522,13 @@ print("when the ground truth says 'absent' -- because absence might just be unta
     )
     st.markdown("**Your Code:**")
     code = st_monaco(
-        value=default_code, height="420px", language="python", theme="vs-dark"
+        value=_lab7_monaco_value("lab7_step4_code", default_code),
+        height="420px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab7_sync_monaco_code("lab7_step4_code", code)
+    code = _lab7_monaco_value("lab7_step4_code", default_code)
 
     if st.button("Run BCE Loss", key="run_bce"):
         ctx = {"np": np}
@@ -1375,38 +1552,50 @@ print("when the ground truth says 'absent' -- because absence might just be unta
                 st.error(msg)
 
     if st.session_state.get("lab7_step_4_done"):
-        loss_standard = st.session_state["lab7_step4_loss_standard"]
-        loss_weighted = st.session_state["lab7_step4_loss_weighted"]
-        bce_fn = st.session_state["lab7_step4_bce_fn"]
-        probs = st.session_state["lab7_step4_probs"]
-        targets = st.session_state["lab7_step4_targets"]
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            fig = go.Figure(
-                data=[
-                    go.Bar(
-                        x=["Standard (w=1.0)", "Weighted (w=0.1)"],
-                        y=[loss_standard, loss_weighted],
-                        marker_color=["#d62728", "#2ca02c"],
-                        text=[f"{loss_standard:.4f}", f"{loss_weighted:.4f}"],
-                        textposition="auto",
-                    )
-                ]
+        _s4_need = (
+            "lab7_step4_loss_standard",
+            "lab7_step4_loss_weighted",
+            "lab7_step4_probs",
+            "lab7_step4_targets",
+        )
+        if any(k not in st.session_state for k in _s4_need):
+            st.info(
+                "Step 4 is marked complete, but BCE numbers are not in memory "
+                "(new session or JSON missing those fields). Click **Run BCE Loss** once."
             )
-            fig.update_layout(
-                title="BCE Loss: Standard vs Weighted",
-                yaxis_title="Loss",
-                height=350,
-                width=500,
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        else:
+            loss_standard = st.session_state["lab7_step4_loss_standard"]
+            loss_weighted = st.session_state["lab7_step4_loss_weighted"]
+            bce_fn = st.session_state.get("lab7_step4_bce_fn")
+            probs = st.session_state["lab7_step4_probs"]
+            targets = st.session_state["lab7_step4_targets"]
 
-        with col2:
-            st.markdown("### Why Down-weight Negatives?")
-            st.markdown(
-                """
+            col1, col2 = st.columns(2)
+
+            with col1:
+                fig = go.Figure(
+                    data=[
+                        go.Bar(
+                            x=["Standard (w=1.0)", "Weighted (w=0.1)"],
+                            y=[loss_standard, loss_weighted],
+                            marker_color=["#d62728", "#2ca02c"],
+                            text=[f"{loss_standard:.4f}", f"{loss_weighted:.4f}"],
+                            textposition="auto",
+                        )
+                    ]
+                )
+                fig.update_layout(
+                    title="BCE Loss: Standard vs Weighted",
+                    yaxis_title="Loss",
+                    height=350,
+                    width=500,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                st.markdown("### Why Down-weight Negatives?")
+                st.markdown(
+                    """
             In real-world detection (movie genres, market signals, medical symptoms):
 
             - **Positive labels are reliable:** if tagged, it's probably true
@@ -1417,52 +1606,60 @@ print("when the ground truth says 'absent' -- because absence might just be unta
             *"Don't be too confident that something is absent
             just because it's not labeled."*
             """
-            )
+                )
 
-        # Interactive: explore neg_weight effect (runs every rerun so slider updates the plot)
-        st.markdown("---")
-        st.markdown("### Experiment: Effect of Negative Weight")
+            # Interactive: explore neg_weight effect (needs live `bce_loss` from a run — not in JSON)
+            if bce_fn is not None:
+                st.markdown("---")
+                st.markdown("### Experiment: Effect of Negative Weight")
 
-        neg_w = st.slider(
-            "Negative weight (omega)", 0.0, 1.0, 0.1, 0.05, key="exp_neg_weight"
-        )
+                neg_w = st.slider(
+                    "Negative weight (omega)", 0.0, 1.0, 0.1, 0.05, key="exp_neg_weight"
+                )
 
-        sweep_weights = np.linspace(0.0, 1.0, 50)
-        sweep_losses = [bce_fn(probs, targets, neg_weight=w) for w in sweep_weights]
+                sweep_weights = np.linspace(0.0, 1.0, 50)
+                sweep_losses = [
+                    bce_fn(probs, targets, neg_weight=w) for w in sweep_weights
+                ]
 
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=sweep_weights,
-                y=sweep_losses,
-                mode="lines",
-                name="BCE Loss",
-                line=dict(color="#1f77b4", width=2),
-            )
-        )
-        current_loss = bce_fn(probs, targets, neg_weight=neg_w)
-        fig.add_trace(
-            go.Scatter(
-                x=[neg_w],
-                y=[current_loss],
-                mode="markers",
-                name=f"w={neg_w:.2f}",
-                marker=dict(size=12, color="red"),
-            )
-        )
-        fig.update_layout(
-            title="BCE Loss vs Negative Weight",
-            xaxis_title="Negative Weight (omega)",
-            yaxis_title="Loss",
-            height=350,
-            width=600,
-        )
-        st.plotly_chart(fig, use_container_width=True)
+                fig = go.Figure()
+                fig.add_trace(
+                    go.Scatter(
+                        x=sweep_weights,
+                        y=sweep_losses,
+                        mode="lines",
+                        name="BCE Loss",
+                        line=dict(color="#1f77b4", width=2),
+                    )
+                )
+                current_loss = bce_fn(probs, targets, neg_weight=neg_w)
+                fig.add_trace(
+                    go.Scatter(
+                        x=[neg_w],
+                        y=[current_loss],
+                        mode="markers",
+                        name=f"w={neg_w:.2f}",
+                        marker=dict(size=12, color="red"),
+                    )
+                )
+                fig.update_layout(
+                    title="BCE Loss vs Negative Weight",
+                    xaxis_title="Negative Weight (omega)",
+                    yaxis_title="Loss",
+                    height=350,
+                    width=600,
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
-        st.info(
-            f"At omega={neg_w:.2f}, loss = {current_loss:.4f}. "
-            "Lower omega = less penalty for predicting 'present' when label says 'absent'."
-        )
+                st.info(
+                    f"At omega={neg_w:.2f}, loss = {current_loss:.4f}. "
+                    "Lower omega = less penalty for predicting 'present' when label says 'absent'."
+                )
+            else:
+                st.info(
+                    "Step 4 is restored from disk, but the **negative-weight experiment** needs your "
+                    "`bce_loss` function in memory. Click **Run BCE Loss** once."
+                )
 
 
 # ── Step 5: Trading Competition ──────────────────────────────────
@@ -1958,8 +2155,13 @@ for i, name in enumerate(signal_names):
 
     st.markdown("**Your Code:**")
     code = st_monaco(
-        value=default_code, height="520px", language="python", theme="vs-dark"
+        value=_lab7_monaco_value("lab7_step5_code", default_code),
+        height="520px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab7_sync_monaco_code("lab7_step5_code", code)
+    code = _lab7_monaco_value("lab7_step5_code", default_code)
 
     if st.button("Run Detector", key="run_detection", type="primary"):
         ctx = {
@@ -2455,8 +2657,13 @@ print("interactions between factors that linear models miss.")"""
 
     st.markdown("**Your Code:**")
     code = st_monaco(
-        value=default_code, height="500px", language="python", theme="vs-dark"
+        value=_lab7_monaco_value("lab7_step6_code", default_code),
+        height="500px",
+        language="python",
+        theme="vs-dark",
     )
+    _lab7_sync_monaco_code("lab7_step6_code", code)
+    code = _lab7_monaco_value("lab7_step6_code", default_code)
 
     trader_name = st.text_input(
         "Your name (for the leaderboard):",

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import io
+import json
 import os
 import sys
 import traceback
@@ -54,6 +55,144 @@ LAB9_TRAIN_LR = 0.001
 # Steps 5–6: no custom query UI until Step 3 stores `lab9_retrieval_model` (Lesson 8–style gate).
 LAB9_MSG_STEP3_REQUIRED = "Custom retrieval requires Step 3:"
 
+# Persistence: lab_json/lab9_form_answers.json (student code + flags; not models / arrays / DataFrames)
+_LAB9_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+_LAB9_ANSWERS_DIR = os.path.join(_LAB9_ROOT, "lab_json")
+_LAB9_ANSWERS_FILE = os.path.join(_LAB9_ANSWERS_DIR, "lab9_form_answers.json")
+
+_LAB9_SKIP_SAVE_KEYS = frozenset(
+    {
+        "lab9_df",
+        "lab9_text_np",
+        "lab9_image_np",
+        "lab9_retrieval_model",
+        "lab9_data_ready",
+        "lab9_pg_zt",
+        "lab9_pg_zi",
+        "lab9_pg_meta",
+        "lab9_bonus_comparison_df",
+        "lab9_bonus_comparison_meta",
+        "lab9_temp_softmax_fig",
+        "lab9_data_warning",
+    }
+)
+
+# st.button / slider / multiselect / file_uploader keys — cannot assign via session_state (load/save).
+_LAB9_WIDGET_KEYS = frozenset(
+    {
+        "lab9_b1",
+        "lab9_b2",
+        "lab9_b3",
+        "lab9_b4",
+        "lab9_bonus_run",
+        "lab9_bonus_taus",
+        "lab9_bonus_epochs",
+        "lab9_t2i_k",
+        "lab9_t2i_custom_text",
+        "lab9_t2i_custom_btn",
+        "lab9_t2i_toy_q",
+        "lab9_t2i_toy_k",
+        "lab9_i2t_k",
+        "lab9_i2t_upload",
+        "lab9_i2t_custom_btn",
+        "lab9_i2t_toy_q",
+        "lab9_i2t_toy_k",
+    }
+)
+
+
+def _lab9_disallowed_persist_key(k: str) -> bool:
+    return isinstance(k, str) and k in _LAB9_WIDGET_KEYS
+
+
+def _lab9_load() -> dict:
+    if os.path.isfile(_LAB9_ANSWERS_FILE):
+        try:
+            with open(_LAB9_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _lab9_restore_value(v):
+    if isinstance(v, dict) and v.get("__lab9_df__"):
+        return pd.DataFrame(v["records"])
+    if isinstance(v, dict) and v.get("__lab9_tuple__"):
+        return tuple(v["items"])
+    return v
+
+
+def _lab9_to_jsonable(v):
+    if isinstance(v, pd.DataFrame):
+        return {"__lab9_df__": True, "records": v.to_dict(orient="records")}
+    if isinstance(v, tuple):
+        return {"__lab9_tuple__": True, "items": list(v)}
+    try:
+        json.dumps(v, default=str)
+        return v
+    except (TypeError, OverflowError):
+        return None
+
+
+def _lab9_save_snapshot_str(data: dict) -> str:
+    return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False)
+
+
+def _lab9_save() -> None:
+    data: dict = {}
+    for k, v in st.session_state.items():
+        if not isinstance(k, str) or not k.startswith("lab9_"):
+            continue
+        if k in _LAB9_SKIP_SAVE_KEYS:
+            continue
+        if _lab9_disallowed_persist_key(k):
+            continue
+        j = _lab9_to_jsonable(v)
+        if j is None:
+            continue
+        data[k] = j
+    try:
+        snap = _lab9_save_snapshot_str(data)
+        if st.session_state.get("_lab9_json_cache") == snap:
+            return
+        existing: dict = {}
+        if os.path.isfile(_LAB9_ANSWERS_FILE):
+            with open(_LAB9_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            st.session_state["_lab9_json_cache"] = snap
+            return
+        os.makedirs(_LAB9_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB9_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        st.session_state["_lab9_json_cache"] = snap
+    except OSError:
+        pass
+
+
+def _lab9_monaco_value(key: str, default_code: str) -> str:
+    v = st.session_state.get(key)
+    if isinstance(v, str) and v.strip():
+        return v
+    return default_code
+
+
+def _lab9_sync_monaco_code(key: str, code) -> None:
+    if not isinstance(code, str):
+        return
+    prev = st.session_state.get(key, "")
+    if code.strip():
+        if st.session_state.get(key) != code:
+            st.session_state[key] = code
+        return
+    if isinstance(prev, str) and prev.strip():
+        return
+    if st.session_state.get(key) != code:
+        st.session_state[key] = code
+
 
 def _lab9_try_store_step3_model(ctx: dict) -> None:
     """After Step 3 passes, keep a CPU copy of `model` for Steps 5–6 (Lesson 8–style retrieval)."""
@@ -85,6 +224,12 @@ def _lab9_encode_query_image(model: nn.Module, i: torch.Tensor) -> torch.Tensor:
     model.eval()
     with torch.no_grad():
         return F.normalize(model.mlp_i(i), p=2, dim=1)
+
+
+def _lab9_playground_query_sims(z: torch.Tensor, q_proj: torch.Tensor) -> np.ndarray:
+    """One query vs gallery rows: z (N, D), q_proj (1, D) → similarities (N,) in row order."""
+    out = z @ q_proj.T
+    return out.squeeze(-1).detach().cpu().numpy().astype(np.float64).reshape(-1)
 
 
 def _lab9_project_pairs_batched(
@@ -727,6 +872,13 @@ def _lab9_bonus_train_one_tau(
 
 
 def render_crossmodal_lab_impl(*, show_solutions: bool = False) -> None:  # noqa: C901
+    saved = _lab9_load()
+    for k, v in saved.items():
+        if _lab9_disallowed_persist_key(k):
+            continue
+        if k not in st.session_state:
+            st.session_state[k] = _lab9_restore_value(v)
+
     st.header("Lab 9: Cross-Modal Retrieval (InfoNCE + Dual Projection)")
 
     st.markdown(
@@ -860,12 +1012,16 @@ $$
 Weights `W_text_fixed`, `W_image_fixed` and biases are **provided** — your job is the projection + normalization logic.
 """
         )
+        default_proj = STEP_PROJECTION_SOL if show_solutions else STEP_PROJECTION_STUB
         code_proj = st_monaco(
-            value=STEP_PROJECTION_SOL if show_solutions else STEP_PROJECTION_STUB,
+            value=_lab9_monaco_value("lab9_code_step1", default_proj),
             height="380px",
             language="python",
             theme="vs-dark",
         )
+        _lab9_sync_monaco_code("lab9_code_step1", code_proj)
+        code_proj = _lab9_monaco_value("lab9_code_step1", default_proj)
+
         if st.button("Run & check Step 1", key="lab9_b1"):
             ctx = {
                 "np": np,
@@ -902,12 +1058,16 @@ On a **small paired batch** (`text_z_fixed`, `image_z_fixed`, already the same i
 Tip: `torch.nn.functional.cross_entropy` takes raw logits. You can use numpy if you implement CE yourself.
 """
         )
+        default_infonce = STEP_INFONCE_SOL if show_solutions else STEP_INFONCE_STUB
         code_infonce = st_monaco(
-            value=STEP_INFONCE_SOL if show_solutions else STEP_INFONCE_STUB,
+            value=_lab9_monaco_value("lab9_code_step2", default_infonce),
             height="320px",
             language="python",
             theme="vs-dark",
         )
+        _lab9_sync_monaco_code("lab9_code_step2", code_infonce)
+        code_infonce = _lab9_monaco_value("lab9_code_step2", default_infonce)
+
         if st.button("Run & check Step 2", key="lab9_b2"):
             ctx = {
                 "np": np,
@@ -948,12 +1108,16 @@ first result. Even a well-trained model on this small dataset typically achieves
 far above the random baseline of ~{100/max(len(va_idx),1):.1f}%.
 """
         )
+        default_train = STEP3_TRAIN_SOL if show_solutions else STEP3_TRAIN_STUB
         code_train = st_monaco(
-            value=STEP3_TRAIN_SOL if show_solutions else STEP3_TRAIN_STUB,
+            value=_lab9_monaco_value("lab9_code_step3", default_train),
             height="520px",
             language="python",
             theme="vs-dark",
         )
+        _lab9_sync_monaco_code("lab9_code_step3", code_train)
+        code_train = _lab9_monaco_value("lab9_code_step3", default_train)
+
         if st.button("Run & check Step 3", key="lab9_b3"):
             ctx = {
                 "np": np,
@@ -1109,12 +1273,16 @@ Store the five floats in `mean_top1_per_tau` (same order as `taus`). Values shou
 This isolates how τ scales logits **without** retraining.
 """
             )
+            default_temp = STEP4_TEMP_SOL if show_solutions else STEP4_TEMP_STUB
             code_temp = st_monaco(
-                value=STEP4_TEMP_SOL if show_solutions else STEP4_TEMP_STUB,
+                value=_lab9_monaco_value("lab9_code_step4", default_temp),
                 height="320px",
                 language="python",
                 theme="vs-dark",
             )
+            _lab9_sync_monaco_code("lab9_code_step4", code_temp)
+            code_temp = _lab9_monaco_value("lab9_code_step4", default_temp)
+
             if st.button("Run & check (optional)", key="lab9_b4"):
                 ctx = {
                     "np": np,
@@ -1210,12 +1378,18 @@ This isolates how τ scales logits **without** retraining.
                         key="lab9_t2i_custom_text",
                     )
                     if st.button("Retrieve images", key="lab9_t2i_custom_btn"):
-                        if not (user_text or "").strip():
+                        q = (
+                            st.session_state.get("lab9_t2i_custom_text")
+                            or user_text
+                            or ""
+                        )
+                        q = q.strip() if isinstance(q, str) else ""
+                        if not q:
                             st.warning("Enter a description first.")
                         else:
                             try:
                                 raw_emb = get_embedder().embed(
-                                    [(user_text or "").strip()],
+                                    [q],
                                     task_type="search_query",
                                 )
                                 q_vec = np.asarray(raw_emb, dtype=np.float32).reshape(
@@ -1241,29 +1415,36 @@ This isolates how τ scales logits **without** retraining.
                                     q_proj = _lab9_encode_query_text(
                                         retrieval_model, q_tensor
                                     )
-                                    sims = (z_image @ q_proj.T).squeeze().cpu().numpy()
+                                    sims = _lab9_playground_query_sims(z_image, q_proj)
                                     order = np.argsort(-sims)[:k_show]
                                     st.subheader("Retrieved images")
-                                    cols = st.columns(ncols)
-                                    for j, ridx in enumerate(order):
-                                        path = sample.iloc[ridx][img_col]
-                                        fp = (
-                                            path
-                                            if os.path.isabs(path)
-                                            else os.path.join(root, path)
-                                        )
-                                        with cols[j % ncols]:
-                                            st.caption(
-                                                f"#{j + 1} (score {sims[ridx]:.3f})"
+                                    row_width = ncols
+                                    for row_start in range(0, len(order), row_width):
+                                        chunk = order[row_start : row_start + row_width]
+                                        cols = st.columns(len(chunk))
+                                        for ci, ridx in enumerate(chunk):
+                                            rank = row_start + ci + 1
+                                            path = sample.iloc[int(ridx)][img_col]
+                                            fp = (
+                                                path
+                                                if os.path.isabs(path)
+                                                else os.path.join(root, path)
                                             )
-                                            if isinstance(path, str) and os.path.isfile(
-                                                fp
-                                            ):
-                                                st.image(fp, use_container_width=True)
-                                            else:
+                                            with cols[ci]:
                                                 st.caption(
-                                                    f"Row {ridx} (no local image file)"
+                                                    f"#{rank} (score {sims[int(ridx)]:.3f})"
                                                 )
+                                                if isinstance(
+                                                    path, str
+                                                ) and os.path.isfile(fp):
+                                                    st.image(
+                                                        fp,
+                                                        use_container_width=True,
+                                                    )
+                                                else:
+                                                    st.caption(
+                                                        f"Row {int(ridx)} (no local image file)"
+                                                    )
                             except Exception as e:  # noqa: BLE001
                                 st.error(
                                     "Could not run the text embedder (network / Hugging Face / "
@@ -1382,17 +1563,17 @@ This isolates how τ scales logits **without** retraining.
                                     q_proj = _lab9_encode_query_image(
                                         retrieval_model, q_tensor
                                     )
-                                    sims = (z_text @ q_proj.T).squeeze().cpu().numpy()
+                                    sims = _lab9_playground_query_sims(z_text, q_proj)
                                     order = np.argsort(-sims)[:k_show]
                                     st.subheader("Retrieved texts")
                                     for rank, ridx in enumerate(order, start=1):
-                                        r = sample.iloc[ridx]
+                                        r = sample.iloc[int(ridx)]
                                         title = str(r[title_col])[:120]
                                         desc = str(r.get(text_col, ""))[:160].replace(
                                             "\n", " "
                                         )
                                         st.markdown(
-                                            f"**{rank}. {title}** (score {sims[ridx]:.3f})"
+                                            f"**{rank}. {title}** (score {sims[int(ridx)]:.3f})"
                                         )
                                         if desc and desc != title:
                                             st.caption(f"{desc}…")
@@ -1438,3 +1619,5 @@ This isolates how τ scales logits **without** retraining.
                     st.write(
                         f"{rank}. Text row **{ridx}** — score **{float(sims[ridx]):.4f}**"
                     )
+
+    _lab9_save()

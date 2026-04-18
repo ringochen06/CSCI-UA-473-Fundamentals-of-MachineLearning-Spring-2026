@@ -1,0 +1,268 @@
+{
+  "lab8_step_1_done": true,
+  "lab8_step_4_done": true,
+  "lab8_loaded_embedding_type": "Text Embeddings (768-dim)",
+  "lab8_step_3_done": true,
+  "lab8_step_6_result": {
+    "output": "Final train NLL: 0.4905\nFinal val NLL:   4.4486\n",
+    "tb": null,
+    "passed": true,
+    "msg": "✅ MDN training complete!"
+  },
+  "lab8_step_3_result": {
+    "output": "Final train loss: 0.3248\nFinal val loss:   0.4167\n",
+    "tb": null,
+    "passed": true,
+    "msg": "✅ MLP training complete!"
+  },
+  "lab8_step3_code": "from sklearn.model_selection import train_test_split\n\n# Split 80/10/10\nX_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)\nX_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)\n\n# Convert to tensors\nX_train_t = torch.tensor(X_train, dtype=torch.float32)\ny_train_t = torch.tensor(y_train, dtype=torch.float32)\nX_val_t = torch.tensor(X_val, dtype=torch.float32)\ny_val_t = torch.tensor(y_val, dtype=torch.float32)\nX_test_t = torch.tensor(X_test, dtype=torch.float32)\ny_test_t = torch.tensor(y_test, dtype=torch.float32)\n\n# TODO: Instantiate model, optimizer, and loss function\nmodel_mlp = MLPRegressor()\noptimizer = optim.Adam(model_mlp.parameters(), lr=1e-3)\nloss_fn = nn.MSELoss()\n\n# TODO: Training loop — 300 epochs\nmlp_train_losses = []\nmlp_val_losses = []\n\nfor epoch in range(300):\n    # --- Train ---\n    model_mlp.train()\n    optimizer.zero_grad()\n    train_preds = model_mlp(X_train_t)\n    train_loss = loss_fn(train_preds, y_train_t)\n    train_loss.backward()\n    optimizer.step()\n\n    # --- Validate ---\n    model_mlp.eval()\n    with torch.no_grad():\n        val_preds = model_mlp(X_val_t)\n        val_loss = loss_fn(val_preds, y_val_t)\n\n    # Append losses\n    mlp_train_losses.append(train_loss.item())\n    mlp_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {mlp_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {mlp_val_losses[-1]:.4f}\")",
+  "lab8_step_2_result": {
+    "output": "",
+    "tb": null,
+    "passed": true,
+    "msg": "✅ MLPRegressor architecture looks good!"
+  },
+  "lab8_step_6_done": true,
+  "lab8_step1_code": "import numpy as np\n\n# Stack embeddings into (N, 768)\nX = np.vstack(df[\"embedding\"].values)\n\n# Apply log transform to price\ny = np.log(df[\"price\"].values)\n\nprint(f\"X shape: {X.shape}\")\nprint(f\"y shape: {y.shape}\")\nprint(f\"y range: {y.min():.2f} - {y.max():.2f}\")",
+  "lab8_step_0_result": {
+    "output": "Loaded 5,000 listings\nPrice range: $10 - $1999\nmean: 215.81\nmedian: 150.00\nstd: 211.80\nskewness: 3.20\n",
+    "tb": null,
+    "passed": true,
+    "msg": "Data loaded! Take a look at the distribution — what do you notice?"
+  },
+  "lab8_step2_code": "import torch\nimport torch.nn as nn\n\nclass MLPRegressor(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.net = nn.Sequential(\n            nn.Linear(768, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, 1)\n        )\n\n    def forward(self, x):\n        return self.net(x).squeeze(-1)",
+  "lab8_step_4_result": {
+    "output": "Final train loss: 0.0059\nFinal val loss:   0.3488\n",
+    "tb": null,
+    "passed": true,
+    "msg": "Standardized model trained! Compare the metrics to Step 3."
+  },
+  "lab8_step_5_done": true,
+  "lab8_step_5_result": {
+    "output": "",
+    "tb": null,
+    "passed": true,
+    "msg": "✅ MDN architecture looks good!"
+  },
+  "lab8_embedding_choice": "Text Embeddings (768-dim)",
+  "lab8_step_1_result": {
+    "output": "X shape: (5000, 768)\ny shape: (5000,)\ny range: 2.30 - 7.60\n",
+    "tb": null,
+    "passed": true,
+    "msg": "✅ Data loaded! X and y are ready for modeling."
+  },
+  "lab8_step4_code": "from sklearn.preprocessing import StandardScaler\n\n# TODO: Fit scaler on training data, transform all splits\nscaler = StandardScaler()\nX_train_s = scaler.fit_transform(X_train)\nX_val_s = scaler.transform(X_val)\nX_test_s = scaler.transform(X_test)\n\n# Re-create tensors from scaled data\nX_train_t = torch.tensor(X_train_s, dtype=torch.float32)\ny_train_t = torch.tensor(y_train, dtype=torch.float32)\nX_val_t = torch.tensor(X_val_s, dtype=torch.float32)\ny_val_t = torch.tensor(y_val, dtype=torch.float32)\nX_test_t = torch.tensor(X_test_s, dtype=torch.float32)\ny_test_t = torch.tensor(y_test, dtype=torch.float32)\n\n# Train a fresh MLP on standardized features\nmodel_mlp = MLPRegressor()\noptimizer = optim.Adam(model_mlp.parameters(), lr=1e-3)\nloss_fn = nn.MSELoss()\n\nmlp_train_losses = []\nmlp_val_losses = []\n\nfor epoch in range(300):\n    model_mlp.train()\n    optimizer.zero_grad()\n    train_preds = model_mlp(X_train_t)\n    train_loss = loss_fn(train_preds, y_train_t)\n    train_loss.backward()\n    optimizer.step()\n\n    model_mlp.eval()\n    with torch.no_grad():\n        val_preds = model_mlp(X_val_t)\n        val_loss = loss_fn(val_preds, y_val_t)\n\n    mlp_train_losses.append(train_loss.item())\n    mlp_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {mlp_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {mlp_val_losses[-1]:.4f}\")",
+  "lab8_step5_code": "class MDN(nn.Module):\n    def __init__(self, n_components=5):\n        super().__init__()\n        self.K = n_components\n\n        # TODO: Define shared trunk\n        self.trunk = nn.Sequential(\n            nn.Linear(768, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU()\n        )\n\n        # TODO: Define three heads\n        self.pi_head = nn.Linear(128, self.K)\n        self.mu_head = nn.Linear(128, self.K)\n        self.sigma_head = nn.Linear(128, self.K)\n\n    def forward(self, x):\n        h = self.trunk(x)\n\n        # TODO: Compute pi (softmax), mu, sigma (softplus + epsilon)\n        pi = torch.softmax(self.pi_head(h), dim=-1)              # shape (N, K), sums to 1\n        mu = self.mu_head(h)                                     # shape (N, K)\n        sigma = F.softplus(self.sigma_head(h)) + 1e-6            # shape (N, K), strictly positive\n\n        return pi, mu, sigma",
+  "lab8_step_2_done": true,
+  "lab8_step_0_done": true,
+  "lab8_bundles_by_embedding": {
+    "Text Embeddings (768-dim)": {
+      "lab8_step_1_done": true,
+      "lab8_step_4_done": true,
+      "lab8_step_3_done": true,
+      "lab8_step_6_result": {
+        "output": "Final train NLL: 0.4905\nFinal val NLL:   4.4486\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MDN training complete!"
+      },
+      "lab8_step_3_result": {
+        "output": "Final train loss: 0.3248\nFinal val loss:   0.4167\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MLP training complete!"
+      },
+      "lab8_step3_code": "from sklearn.model_selection import train_test_split\n\n# Split 80/10/10\nX_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)\nX_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)\n\n# Convert to tensors\nX_train_t = torch.tensor(X_train, dtype=torch.float32)\ny_train_t = torch.tensor(y_train, dtype=torch.float32)\nX_val_t = torch.tensor(X_val, dtype=torch.float32)\ny_val_t = torch.tensor(y_val, dtype=torch.float32)\nX_test_t = torch.tensor(X_test, dtype=torch.float32)\ny_test_t = torch.tensor(y_test, dtype=torch.float32)\n\n# TODO: Instantiate model, optimizer, and loss function\nmodel_mlp = MLPRegressor()\noptimizer = optim.Adam(model_mlp.parameters(), lr=1e-3)\nloss_fn = nn.MSELoss()\n\n# TODO: Training loop — 300 epochs\nmlp_train_losses = []\nmlp_val_losses = []\n\nfor epoch in range(300):\n    # --- Train ---\n    model_mlp.train()\n    optimizer.zero_grad()\n    train_preds = model_mlp(X_train_t)\n    train_loss = loss_fn(train_preds, y_train_t)\n    train_loss.backward()\n    optimizer.step()\n\n    # --- Validate ---\n    model_mlp.eval()\n    with torch.no_grad():\n        val_preds = model_mlp(X_val_t)\n        val_loss = loss_fn(val_preds, y_val_t)\n\n    # Append losses\n    mlp_train_losses.append(train_loss.item())\n    mlp_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {mlp_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {mlp_val_losses[-1]:.4f}\")",
+      "lab8_step_2_result": {
+        "output": "",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MLPRegressor architecture looks good!"
+      },
+      "lab8_step_6_done": true,
+      "lab8_step1_code": "import numpy as np\n\n# Stack embeddings into (N, 768)\nX = np.vstack(df[\"embedding\"].values)\n\n# Apply log transform to price\ny = np.log(df[\"price\"].values)\n\nprint(f\"X shape: {X.shape}\")\nprint(f\"y shape: {y.shape}\")\nprint(f\"y range: {y.min():.2f} - {y.max():.2f}\")",
+      "lab8_step_0_result": {
+        "output": "Loaded 5,000 listings\nPrice range: $10 - $1999\nmean: 215.81\nmedian: 150.00\nstd: 211.80\nskewness: 3.20\n",
+        "tb": null,
+        "passed": true,
+        "msg": "Data loaded! Take a look at the distribution — what do you notice?"
+      },
+      "lab8_step2_code": "import torch\nimport torch.nn as nn\n\nclass MLPRegressor(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.net = nn.Sequential(\n            nn.Linear(768, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, 1)\n        )\n\n    def forward(self, x):\n        return self.net(x).squeeze(-1)",
+      "lab8_step_4_result": {
+        "output": "Final train loss: 0.0059\nFinal val loss:   0.3488\n",
+        "tb": null,
+        "passed": true,
+        "msg": "Standardized model trained! Compare the metrics to Step 3."
+      },
+      "lab8_step_5_done": true,
+      "lab8_step_5_result": {
+        "output": "",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MDN architecture looks good!"
+      },
+      "lab8_step_1_result": {
+        "output": "X shape: (5000, 768)\ny shape: (5000,)\ny range: 2.30 - 7.60\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ Data loaded! X and y are ready for modeling."
+      },
+      "lab8_step4_code": "from sklearn.preprocessing import StandardScaler\n\n# TODO: Fit scaler on training data, transform all splits\nscaler = StandardScaler()\nX_train_s = scaler.fit_transform(X_train)\nX_val_s = scaler.transform(X_val)\nX_test_s = scaler.transform(X_test)\n\n# Re-create tensors from scaled data\nX_train_t = torch.tensor(X_train_s, dtype=torch.float32)\ny_train_t = torch.tensor(y_train, dtype=torch.float32)\nX_val_t = torch.tensor(X_val_s, dtype=torch.float32)\ny_val_t = torch.tensor(y_val, dtype=torch.float32)\nX_test_t = torch.tensor(X_test_s, dtype=torch.float32)\ny_test_t = torch.tensor(y_test, dtype=torch.float32)\n\n# Train a fresh MLP on standardized features\nmodel_mlp = MLPRegressor()\noptimizer = optim.Adam(model_mlp.parameters(), lr=1e-3)\nloss_fn = nn.MSELoss()\n\nmlp_train_losses = []\nmlp_val_losses = []\n\nfor epoch in range(300):\n    model_mlp.train()\n    optimizer.zero_grad()\n    train_preds = model_mlp(X_train_t)\n    train_loss = loss_fn(train_preds, y_train_t)\n    train_loss.backward()\n    optimizer.step()\n\n    model_mlp.eval()\n    with torch.no_grad():\n        val_preds = model_mlp(X_val_t)\n        val_loss = loss_fn(val_preds, y_val_t)\n\n    mlp_train_losses.append(train_loss.item())\n    mlp_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {mlp_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {mlp_val_losses[-1]:.4f}\")",
+      "lab8_step5_code": "class MDN(nn.Module):\n    def __init__(self, n_components=5):\n        super().__init__()\n        self.K = n_components\n\n        # TODO: Define shared trunk\n        self.trunk = nn.Sequential(\n            nn.Linear(768, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU()\n        )\n\n        # TODO: Define three heads\n        self.pi_head = nn.Linear(128, self.K)\n        self.mu_head = nn.Linear(128, self.K)\n        self.sigma_head = nn.Linear(128, self.K)\n\n    def forward(self, x):\n        h = self.trunk(x)\n\n        # TODO: Compute pi (softmax), mu, sigma (softplus + epsilon)\n        pi = torch.softmax(self.pi_head(h), dim=-1)              # shape (N, K), sums to 1\n        mu = self.mu_head(h)                                     # shape (N, K)\n        sigma = F.softplus(self.sigma_head(h)) + 1e-6            # shape (N, K), strictly positive\n\n        return pi, mu, sigma",
+      "lab8_step_2_done": true,
+      "lab8_step_0_done": true,
+      "lab8_step6_code": "def mdn_loss(pi, mu, sigma, y):\n    \"\"\"Negative log-likelihood for mixture of Gaussians.\"\"\"\n    y = y.unsqueeze(-1)  # (N, 1) for broadcasting\n\n    # TODO: Compute log-prob for each component\n    # log_component_prob = log(pi) + log(N(y | mu, sigma^2))\n    # Use torch.logsumexp for numerical stability\n    # Return: mean negative log-likelihood\n    log_pi = torch.log(pi + 1e-8)\n    log_gaussian = (\n        -torch.log(sigma)\n        - 0.5 * ((y - mu) ** 2) / (sigma ** 2)\n        - 0.5 * torch.log(torch.tensor(2 * torch.pi, dtype=sigma.dtype, device=sigma.device))\n    )\n    log_component_prob = log_pi + log_gaussian\n    log_prob = torch.logsumexp(log_component_prob, dim=-1)\n\n    return -log_prob.mean()\n\n# Train MDN\nmodel_mdn = MDN(n_components=5)\noptimizer = optim.Adam(model_mdn.parameters(), lr=1e-3)\n\nmdn_train_losses = []\nmdn_val_losses = []\n\nfor epoch in range(300):\n    model_mdn.train()\n    optimizer.zero_grad()\n    pi, mu, sigma = model_mdn(X_train_t)\n    # TODO: compute loss, backprop, step\n    loss = mdn_loss(pi, mu, sigma, y_train_t)\n    loss.backward()\n    optimizer.step()\n\n    model_mdn.eval()\n    with torch.no_grad():\n        pi_v, mu_v, sigma_v = model_mdn(X_val_t)\n        val_loss = mdn_loss(pi_v, mu_v, sigma_v, y_val_t)\n\n    mdn_train_losses.append(loss.item())\n    mdn_val_losses.append(val_loss.item())\n\nprint(f\"Final train NLL: {mdn_train_losses[-1]:.4f}\")\nprint(f\"Final val NLL:   {mdn_val_losses[-1]:.4f}\")",
+      "lab8_step0_code": "import pandas as pd\n\n# Load the Airbnb dataset\ndf = pd.read_parquet(\"data/processed/airbnb_embedded.parquet\")\n\n# Filter price range\ndf = df[(df[\"price\"] >= 10) & (df[\"price\"] <= 2000)].reset_index(drop=True)\n\n# Compute descriptive statistics of the price column\nstats = {\n    \"mean\": df[\"price\"].mean(),\n    \"median\": df[\"price\"].median(),\n    \"std\": df[\"price\"].std(),\n    \"skewness\": df[\"price\"].skew()\n}\n\nprint(f\"Loaded {len(df):,} listings\")\nprint(f\"Price range: ${df['price'].min():.0f} - ${df['price'].max():.0f}\")\nfor k, v in stats.items():\n    print(f\"{k}: {v:.2f}\")",
+      "lab8_step_7_result": {
+        "output": "Final train loss: 0.0134\nFinal val loss:   0.2148\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ Quantile regression complete! All three models trained."
+      },
+      "lab8_step_7_done": true,
+      "lab8_step7_code": "QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]\n\nclass SQRModel(nn.Module):\n    def __init__(self, n_quantiles=5):\n        super().__init__()\n        # TODO: Same trunk as MLP, but output n_quantiles instead of 1\n        self.net = nn.Sequential(\n            nn.Linear(768, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, n_quantiles)\n        )\n\n    def forward(self, x):\n        return self.net(x)  # shape (N, n_quantiles)\n\ndef pinball_loss(preds, targets, quantiles):\n    \"\"\"\n    preds: (N, Q) predicted quantiles\n    targets: (N,) true values\n    quantiles: list of Q quantile levels\n    \"\"\"\n    # TODO: Implement pinball loss\n    # Hint: errors = targets.unsqueeze(-1) - preds\n    # Then apply asymmetric weighting per quantile\n    errors = targets.unsqueeze(-1) - preds\n    loss = torch.maximum(quantiles * errors, (quantiles - 1) * errors)\n    return loss.mean()\n\nmodel_sqr = SQRModel(n_quantiles=len(QUANTILES))\noptimizer = optim.Adam(model_sqr.parameters(), lr=1e-3, weight_decay=1e-4)\nquantiles_t = torch.tensor(QUANTILES, dtype=torch.float32)\n\nsqr_train_losses = []\nsqr_val_losses = []\n\nfor epoch in range(300):\n    model_sqr.train()\n    optimizer.zero_grad()\n    preds = model_sqr(X_train_t)\n    loss = pinball_loss(preds, y_train_t, quantiles_t)\n    loss.backward()\n    optimizer.step()\n\n    model_sqr.eval()\n    with torch.no_grad():\n        val_preds = model_sqr(X_val_t)\n        val_loss = pinball_loss(val_preds, y_val_t, quantiles_t)\n\n    sqr_train_losses.append(loss.item())\n    sqr_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {sqr_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {sqr_val_losses[-1]:.4f}\")"
+    },
+    "Image Embeddings (384-dim)": {
+      "lab8_step_1_done": true,
+      "lab8_step_4_done": true,
+      "lab8_step_3_done": true,
+      "lab8_step_6_result": {
+        "output": "Final train NLL: -0.3616\nFinal val NLL:   3.0530\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MDN training complete!"
+      },
+      "lab8_step_3_result": {
+        "output": "Final train loss: 0.2002\nFinal val loss:   0.4317\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MLP training complete!"
+      },
+      "lab8_step3_code": "from sklearn.model_selection import train_test_split\n\n# Split 80/10/10\nX_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)\nX_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)\n\n# Convert to tensors\nX_train_t = torch.tensor(X_train, dtype=torch.float32)\ny_train_t = torch.tensor(y_train, dtype=torch.float32)\nX_val_t = torch.tensor(X_val, dtype=torch.float32)\ny_val_t = torch.tensor(y_val, dtype=torch.float32)\nX_test_t = torch.tensor(X_test, dtype=torch.float32)\ny_test_t = torch.tensor(y_test, dtype=torch.float32)\n\n# TODO: Instantiate model, optimizer, and loss function\nmodel_mlp = MLPRegressor()\noptimizer = optim.Adam(model_mlp.parameters(), lr=1e-3)\nloss_fn = nn.MSELoss()\n\n# TODO: Training loop — 300 epochs\nmlp_train_losses = []\nmlp_val_losses = []\n\nfor epoch in range(300):\n    # --- Train ---\n    model_mlp.train()\n    optimizer.zero_grad()\n    train_preds = model_mlp(X_train_t)\n    train_loss = loss_fn(train_preds, y_train_t)\n    train_loss.backward()\n    optimizer.step()\n\n    # --- Validate ---\n    model_mlp.eval()\n    with torch.no_grad():\n        val_preds = model_mlp(X_val_t)\n        val_loss = loss_fn(val_preds, y_val_t)\n\n    # Append losses\n    mlp_train_losses.append(train_loss.item())\n    mlp_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {mlp_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {mlp_val_losses[-1]:.4f}\")",
+      "lab8_step_2_result": {
+        "output": "",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MLPRegressor architecture looks good!"
+      },
+      "lab8_step_6_done": true,
+      "lab8_step1_code": "# TODO: Stack embeddings into a 2-D numpy matrix (N, 384)\nX = np.vstack(df[\"image_embedding\"].values)\n\n# TODO: Create target vector y from the price column.\n# Think about the distribution you saw in Step 0 –\n# what transformation would make this a better regression target?\ny = np.log(df[\"price\"].values)\n\nprint(f\"X: {type(X)}\")\nprint(f\"y: {type(y)}\")",
+      "lab8_step_0_result": {
+        "output": "Loaded 5,000 listings\nPrice range: $10 - $1999\nmean: 215.81\nmedian: 150.00\nstd: 211.80\nskewness: 3.20\n",
+        "tb": null,
+        "passed": true,
+        "msg": "Data loaded! Take a look at the distribution — what do you notice?"
+      },
+      "lab8_step2_code": "class MLPRegressor(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.net = nn.Sequential(\n            nn.Linear(384, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, 1)\n        )\n\n    def forward(self, x):\n        return self.net(x).squeeze(-1)",
+      "lab8_step_4_result": {
+        "output": "Final train loss: 0.0889\nFinal val loss:   0.4741\n",
+        "tb": null,
+        "passed": true,
+        "msg": "Standardized model trained! Compare the metrics to Step 3."
+      },
+      "lab8_step_5_done": true,
+      "lab8_step_5_result": {
+        "output": "",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MDN architecture looks good!"
+      },
+      "lab8_step_1_result": {
+        "output": "X: <class 'numpy.ndarray'>\ny: <class 'numpy.ndarray'>\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ Data loaded! X and y are ready for modeling."
+      },
+      "lab8_step4_code": "from sklearn.preprocessing import StandardScaler\n\n# TODO: Fit scaler on training data, transform all splits\nscaler = StandardScaler()\nX_train_s = scaler.fit_transform(X_train)\nX_val_s = scaler.transform(X_val)\nX_test_s = scaler.transform(X_test)\n\n# Re-create tensors from scaled data\nX_train_t = torch.tensor(X_train_s, dtype=torch.float32)\ny_train_t = torch.tensor(y_train, dtype=torch.float32)\nX_val_t = torch.tensor(X_val_s, dtype=torch.float32)\ny_val_t = torch.tensor(y_val, dtype=torch.float32)\nX_test_t = torch.tensor(X_test_s, dtype=torch.float32)\ny_test_t = torch.tensor(y_test, dtype=torch.float32)\n\n# Train a fresh MLP on standardized features\nmodel_mlp = MLPRegressor()\noptimizer = optim.Adam(model_mlp.parameters(), lr=1e-3)\nloss_fn = nn.MSELoss()\n\nmlp_train_losses = []\nmlp_val_losses = []\n\nfor epoch in range(300):\n    model_mlp.train()\n    optimizer.zero_grad()\n    train_preds = model_mlp(X_train_t)\n    train_loss = loss_fn(train_preds, y_train_t)\n    train_loss.backward()\n    optimizer.step()\n\n    model_mlp.eval()\n    with torch.no_grad():\n        val_preds = model_mlp(X_val_t)\n        val_loss = loss_fn(val_preds, y_val_t)\n\n    mlp_train_losses.append(train_loss.item())\n    mlp_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {mlp_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {mlp_val_losses[-1]:.4f}\")",
+      "lab8_step5_code": "class MDN(nn.Module):\n    def __init__(self, n_components=5):\n        super().__init__()\n        self.K = n_components\n\n        # TODO: Define shared trunk\n        self.trunk = nn.Sequential(\n            nn.Linear(384, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU()\n        )\n\n        # TODO: Define three heads\n        self.pi_head = nn.Linear(128, self.K)\n        self.mu_head = nn.Linear(128, self.K)\n        self.sigma_head = nn.Linear(128, self.K)\n\n    def forward(self, x):\n        h = self.trunk(x)\n\n        # TODO: Compute pi (softmax), mu, sigma (softplus + epsilon)\n        pi = torch.softmax(self.pi_head(h), dim=-1)   # shape (N, K), sums to 1\n        mu = self.mu_head(h)                          # shape (N, K)\n        sigma = F.softplus(self.sigma_head(h)) + 1e-6  # shape (N, K), strictly positive\n\n        return pi, mu, sigma",
+      "lab8_step_2_done": true,
+      "lab8_step_0_done": true,
+      "lab8_step6_code": "def mdn_loss(pi, mu, sigma, y):\n    \"\"\"Negative log-likelihood for mixture of Gaussians.\"\"\"\n    y = y.unsqueeze(-1)  # (N, 1) for broadcasting\n\n    # TODO: Compute log-prob for each component\n    # log_component_prob = log(pi) + log(N(y | mu, sigma^2))\n    # Use torch.logsumexp for numerical stability\n    # Return: mean negative log-likelihood\n    log_pi = torch.log(pi + 1e-8)\n    log_gaussian = (\n        -torch.log(sigma)\n        - ((y - mu) ** 2) / (2 * sigma ** 2)\n        - 0.5 * torch.log(torch.tensor(2 * torch.pi, dtype=sigma.dtype, device=sigma.device))\n    )\n    log_component_prob = log_pi + log_gaussian\n    log_prob = torch.logsumexp(log_component_prob, dim=-1)\n\n    return -log_prob.mean()\n\n# Train MDN\nmodel_mdn = MDN(n_components=5)\noptimizer = optim.Adam(model_mdn.parameters(), lr=1e-3)\n\nmdn_train_losses = []\nmdn_val_losses = []\n\nfor epoch in range(300):\n    model_mdn.train()\n    optimizer.zero_grad()\n    pi, mu, sigma = model_mdn(X_train_t)\n    loss = mdn_loss(pi, mu, sigma, y_train_t)\n    loss.backward()\n    optimizer.step()\n\n    model_mdn.eval()\n    with torch.no_grad():\n        pi_v, mu_v, sigma_v = model_mdn(X_val_t)\n        val_loss = mdn_loss(pi_v, mu_v, sigma_v, y_val_t)\n\n    mdn_train_losses.append(loss.item())\n    mdn_val_losses.append(val_loss.item())\n\nprint(f\"Final train NLL: {mdn_train_losses[-1]:.4f}\")\nprint(f\"Final val NLL:   {mdn_val_losses[-1]:.4f}\")",
+      "lab8_step0_code": "import pandas as pd\n\n# Load the Airbnb dataset\ndf = pd.read_parquet(\"data/processed/airbnb_embedded.parquet\")\n\n# Filter price range\ndf = df[(df[\"price\"] >= 10) & (df[\"price\"] <= 2000)].reset_index(drop=True)\n\n# Compute descriptive statistics of the price column\nstats = {\n    \"mean\": df[\"price\"].mean(),\n    \"median\": df[\"price\"].median(),\n    \"std\": df[\"price\"].std(),\n    \"skewness\": df[\"price\"].skew()\n}\n\nprint(f\"Loaded {len(df):,} listings\")\nprint(f\"Price range: ${df['price'].min():.0f} - ${df['price'].max():.0f}\")\nfor k, v in stats.items():\n    print(f\"{k}: {v:.2f}\")",
+      "lab8_step_7_result": {
+        "output": "Final train loss: 0.0360\nFinal val loss:   0.2406\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ Quantile regression complete! All three models trained."
+      },
+      "lab8_step_7_done": true,
+      "lab8_step7_code": "QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]\n\nclass SQRModel(nn.Module):\n    def __init__(self, n_quantiles=5):\n        super().__init__()\n        # TODO: Same trunk as MLP, but output n_quantiles instead of 1\n        self.net = nn.Sequential(\n            nn.Linear(384, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, n_quantiles)\n        )\n\n    def forward(self, x):\n        return self.net(x)  # shape (N, n_quantiles)\n\ndef pinball_loss(preds, targets, quantiles):\n    \"\"\"\n    preds: (N, Q) predicted quantiles\n    targets: (N,) true values\n    quantiles: list of Q quantile levels\n    \"\"\"\n    errors = targets.unsqueeze(-1) - preds\n    loss = torch.maximum(quantiles * errors, (quantiles - 1) * errors)\n    return loss.mean()\n\nmodel_sqr = SQRModel(n_quantiles=len(QUANTILES))\noptimizer = optim.Adam(model_sqr.parameters(), lr=1e-3, weight_decay=1e-4)\nquantiles_t = torch.tensor(QUANTILES, dtype=torch.float32)\n\nsqr_train_losses = []\nsqr_val_losses = []\n\nfor epoch in range(300):\n    model_sqr.train()\n    optimizer.zero_grad()\n    preds = model_sqr(X_train_t)\n    loss = pinball_loss(preds, y_train_t, quantiles_t)\n    loss.backward()\n    optimizer.step()\n\n    model_sqr.eval()\n    with torch.no_grad():\n        val_preds = model_sqr(X_val_t)\n        val_loss = pinball_loss(val_preds, y_val_t, quantiles_t)\n\n    sqr_train_losses.append(loss.item())\n    sqr_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {sqr_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {sqr_val_losses[-1]:.4f}\")"
+    },
+    "Joint Embeddings (1152-dim)": {
+      "lab8_step_1_done": true,
+      "lab8_step_4_done": true,
+      "lab8_step_3_done": true,
+      "lab8_step_6_result": {
+        "output": "Final train NLL: -0.6015\nFinal val NLL:   1.3540\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MDN training complete!"
+      },
+      "lab8_step_3_result": {
+        "output": "Final train loss: 0.2009\nFinal val loss:   0.3027\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MLP training complete!"
+      },
+      "lab8_step3_code": "from sklearn.model_selection import train_test_split\n\n# Split 80/10/10\nX_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)\nX_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)\n\n# Convert to tensors\nX_train_t = torch.tensor(X_train, dtype=torch.float32)\ny_train_t = torch.tensor(y_train, dtype=torch.float32)\nX_val_t = torch.tensor(X_val, dtype=torch.float32)\ny_val_t = torch.tensor(y_val, dtype=torch.float32)\nX_test_t = torch.tensor(X_test, dtype=torch.float32)\ny_test_t = torch.tensor(y_test, dtype=torch.float32)\n\n# TODO: Instantiate model, optimizer, and loss function\nmodel_mlp = MLPRegressor()\noptimizer = optim.Adam(model_mlp.parameters(), lr=1e-3)\nloss_fn = nn.MSELoss()\n\n# TODO: Training loop — 300 epochs\nmlp_train_losses = []\nmlp_val_losses = []\n\nfor epoch in range(300):\n    # --- Train ---\n    model_mlp.train()\n    optimizer.zero_grad()\n    train_preds = model_mlp(X_train_t)\n    train_loss = loss_fn(train_preds, y_train_t)\n    train_loss.backward()\n    optimizer.step()\n\n    # --- Validate ---\n    model_mlp.eval()\n    with torch.no_grad():\n        val_preds = model_mlp(X_val_t)\n        val_loss = loss_fn(val_preds, y_val_t)\n\n    # Append losses\n    mlp_train_losses.append(train_loss.item())\n    mlp_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {mlp_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {mlp_val_losses[-1]:.4f}\")",
+      "lab8_step_2_result": {
+        "output": "",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MLPRegressor architecture looks good!"
+      },
+      "lab8_step_6_done": true,
+      "lab8_step1_code": "import numpy as np\n\n# Joint embedding (1152-dim)\nX = np.vstack(df[\"joint_embedding\"].values)\n\ny = np.log(df[\"price\"].values)\n\nprint(f\"X: {type(X)}, shape: {X.shape}\")\nprint(f\"y: {type(y)}, shape: {y.shape}\")",
+      "lab8_step_0_result": {
+        "output": "Loaded 5,000 listings\nPrice range: $10 – $1999\n  mean: 215.8116\n  median: 150.0\n  std: 211.79612278076524\n  skewness: 3.1952313685712275\n",
+        "tb": null,
+        "passed": true,
+        "msg": "Data loaded! Take a look at the distribution — what do you notice?"
+      },
+      "lab8_step2_code": "class MLPRegressor(nn.Module):\n    def __init__(self):\n        super().__init__()\n        # TODO: Define self.net as nn.Sequential\n        # 1152 -> 256 -> ReLU -> 128 -> ReLU -> 1\n        self.net = nn.Sequential(\n            nn.Linear(1152, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, 1)\n        )\n\n    def forward(self, x):\n        # TODO: Return predictions with shape (N,)\n        return self.net(x).squeeze(-1)",
+      "lab8_step_4_result": {
+        "output": "Final train loss: 0.0013\nFinal val loss:   0.3400\n",
+        "tb": null,
+        "passed": true,
+        "msg": "Standardized model trained! Compare the metrics to Step 3."
+      },
+      "lab8_step_5_done": true,
+      "lab8_step_5_result": {
+        "output": "",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ MDN architecture looks good!"
+      },
+      "lab8_step_1_result": {
+        "output": "X: <class 'numpy.ndarray'>, shape: (5000, 1152)\ny: <class 'numpy.ndarray'>, shape: (5000,)\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ Data loaded! X and y are ready for modeling."
+      },
+      "lab8_step4_code": "from sklearn.preprocessing import StandardScaler\n\n# TODO: Fit scaler on training data, transform all splits\nscaler = StandardScaler()\nX_train_s = scaler.fit_transform(X_train)\nX_val_s = scaler.transform(X_val)\nX_test_s = scaler.transform(X_test)\n\n# Re-create tensors from scaled data\nX_train_t = torch.tensor(X_train_s, dtype=torch.float32)\ny_train_t = torch.tensor(y_train, dtype=torch.float32)\nX_val_t = torch.tensor(X_val_s, dtype=torch.float32)\ny_val_t = torch.tensor(y_val, dtype=torch.float32)\nX_test_t = torch.tensor(X_test_s, dtype=torch.float32)\ny_test_t = torch.tensor(y_test, dtype=torch.float32)\n\n# Train a fresh MLP on standardized features\nmodel_mlp = MLPRegressor()\noptimizer = optim.Adam(model_mlp.parameters(), lr=1e-3)\nloss_fn = nn.MSELoss()\n\nmlp_train_losses = []\nmlp_val_losses = []\n\nfor epoch in range(300):\n    model_mlp.train()\n    optimizer.zero_grad()\n    train_preds = model_mlp(X_train_t)\n    train_loss = loss_fn(train_preds, y_train_t)\n    train_loss.backward()\n    optimizer.step()\n\n    model_mlp.eval()\n    with torch.no_grad():\n        val_preds = model_mlp(X_val_t)\n        val_loss = loss_fn(val_preds, y_val_t)\n\n    mlp_train_losses.append(train_loss.item())\n    mlp_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {mlp_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {mlp_val_losses[-1]:.4f}\")",
+      "lab8_step5_code": "class MDN(nn.Module):\n    def __init__(self, n_components=5):\n        super().__init__()\n        self.K = n_components\n\n        # TODO: Define shared trunk\n        self.trunk = nn.Sequential(\n            nn.Linear(1152, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU()\n        )\n\n        # TODO: Define three heads\n        self.pi_head = nn.Linear(128, self.K)\n        self.mu_head = nn.Linear(128, self.K)\n        self.sigma_head = nn.Linear(128, self.K)\n\n    def forward(self, x):\n        h = self.trunk(x)\n\n        # TODO: Compute pi (softmax), mu, sigma (softplus + epsilon)\n        pi = torch.softmax(self.pi_head(h), dim=-1)          # shape (N, K), sums to 1\n        mu = self.mu_head(h)                                 # shape (N, K)\n        sigma = F.softplus(self.sigma_head(h)) + 1e-6        # shape (N, K), strictly positive\n\n        return pi, mu, sigma",
+      "lab8_step_2_done": true,
+      "lab8_step_0_done": true,
+      "lab8_step6_code": "def mdn_loss(pi, mu, sigma, y):\n    \"\"\"Negative log-likelihood for mixture of Gaussians.\"\"\"\n    y = y.unsqueeze(-1)  # (N, 1) for broadcasting\n\n    # TODO: Compute log-prob for each component\n    # log_component_prob = log(pi) + log(N(y | mu, sigma^2))\n    # Use torch.logsumexp for numerical stability\n    # Return: mean negative log-likelihood\n    log_pi = torch.log(pi + 1e-8)\n    log_gaussian = (\n        -torch.log(sigma)\n        - ((y - mu) ** 2) / (2 * sigma ** 2)\n        - 0.5 * torch.log(torch.tensor(2 * torch.pi, dtype=sigma.dtype, device=sigma.device))\n    )\n    log_component_prob = log_pi + log_gaussian\n    log_prob = torch.logsumexp(log_component_prob, dim=-1)\n\n    return -log_prob.mean()\n\n# Train MDN\nmodel_mdn = MDN(n_components=5)\noptimizer = optim.Adam(model_mdn.parameters(), lr=1e-3)\n\nmdn_train_losses = []\nmdn_val_losses = []\n\nfor epoch in range(300):\n    model_mdn.train()\n    optimizer.zero_grad()\n    pi, mu, sigma = model_mdn(X_train_t)\n    # TODO: compute loss, backprop, step\n    loss = mdn_loss(pi, mu, sigma, y_train_t)\n    loss.backward()\n    optimizer.step()\n\n    model_mdn.eval()\n    with torch.no_grad():\n        pi_v, mu_v, sigma_v = model_mdn(X_val_t)\n        val_loss = mdn_loss(pi_v, mu_v, sigma_v, y_val_t)\n\n    mdn_train_losses.append(loss.item())\n    mdn_val_losses.append(val_loss.item())\n\nprint(f\"Final train NLL: {mdn_train_losses[-1]:.4f}\")\nprint(f\"Final val NLL:   {mdn_val_losses[-1]:.4f}\")",
+      "lab8_step0_code": "# Load the Airbnb dataset\ndf = pd.read_parquet(\"data/processed/airbnb_embedded.parquet\")\n\n# Filter price range\ndf = df[(df[\"price\"] >= 10) & (df[\"price\"] <= 2000)].reset_index(drop=True)\n\n# TODO: Compute descriptive statistics of the price column\nstats = {\n    \"mean\": df[\"price\"].mean(),\n    \"median\": df[\"price\"].median(),\n    \"std\": df[\"price\"].std(),\n    \"skewness\": df[\"price\"].skew(),\n}\n\nprint(f\"Loaded {len(df):,} listings\")\nprint(f\"Price range: ${df['price'].min():.0f} – ${df['price'].max():.0f}\")\nfor k, v in stats.items():\n    print(f\"  {k}: {v}\")",
+      "lab8_step_7_result": {
+        "output": "Final train loss: 0.0148\nFinal val loss:   0.1980\n",
+        "tb": null,
+        "passed": true,
+        "msg": "✅ Quantile regression complete! All three models trained."
+      },
+      "lab8_step_7_done": true,
+      "lab8_step7_code": "QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]\n\nclass SQRModel(nn.Module):\n    def __init__(self, n_quantiles=5):\n        super().__init__()\n        # TODO: Same trunk as MLP, but output n_quantiles instead of 1\n        self.net = nn.Sequential(\n            nn.Linear(1152, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, n_quantiles)\n        )\n\n    def forward(self, x):\n        return self.net(x)  # shape (N, n_quantiles)\n\ndef pinball_loss(preds, targets, quantiles):\n    \"\"\"\n    preds: (N, Q) predicted quantiles\n    targets: (N,) true values\n    quantiles: list of Q quantile levels\n    \"\"\"\n    # TODO: Implement pinball loss\n    # Hint: errors = targets.unsqueeze(-1) - preds\n    # Then apply asymmetric weighting per quantile\n    errors = targets.unsqueeze(-1) - preds\n    loss = torch.maximum(quantiles * errors, (quantiles - 1) * errors)\n    return loss.mean()\n\nmodel_sqr = SQRModel(n_quantiles=len(QUANTILES))\noptimizer = optim.Adam(model_sqr.parameters(), lr=1e-3, weight_decay=1e-4)\nquantiles_t = torch.tensor(QUANTILES, dtype=torch.float32)\n\nsqr_train_losses = []\nsqr_val_losses = []\n\nfor epoch in range(300):\n    model_sqr.train()\n    # TODO: forward, loss, backward, step\n    optimizer.zero_grad()\n    preds = model_sqr(X_train_t)\n    loss = pinball_loss(preds, y_train_t, quantiles_t)\n    loss.backward()\n    optimizer.step()\n\n    model_sqr.eval()\n    with torch.no_grad():\n        val_preds = model_sqr(X_val_t)\n        val_loss = pinball_loss(val_preds, y_val_t, quantiles_t)\n\n    sqr_train_losses.append(loss.item())\n    sqr_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {sqr_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {sqr_val_losses[-1]:.4f}\")"
+    }
+  },
+  "lab8_step6_code": "def mdn_loss(pi, mu, sigma, y):\n    \"\"\"Negative log-likelihood for mixture of Gaussians.\"\"\"\n    y = y.unsqueeze(-1)  # (N, 1) for broadcasting\n\n    # TODO: Compute log-prob for each component\n    # log_component_prob = log(pi) + log(N(y | mu, sigma^2))\n    # Use torch.logsumexp for numerical stability\n    # Return: mean negative log-likelihood\n    log_pi = torch.log(pi + 1e-8)\n    log_gaussian = (\n        -torch.log(sigma)\n        - 0.5 * ((y - mu) ** 2) / (sigma ** 2)\n        - 0.5 * torch.log(torch.tensor(2 * torch.pi, dtype=sigma.dtype, device=sigma.device))\n    )\n    log_component_prob = log_pi + log_gaussian\n    log_prob = torch.logsumexp(log_component_prob, dim=-1)\n\n    return -log_prob.mean()\n\n# Train MDN\nmodel_mdn = MDN(n_components=5)\noptimizer = optim.Adam(model_mdn.parameters(), lr=1e-3)\n\nmdn_train_losses = []\nmdn_val_losses = []\n\nfor epoch in range(300):\n    model_mdn.train()\n    optimizer.zero_grad()\n    pi, mu, sigma = model_mdn(X_train_t)\n    # TODO: compute loss, backprop, step\n    loss = mdn_loss(pi, mu, sigma, y_train_t)\n    loss.backward()\n    optimizer.step()\n\n    model_mdn.eval()\n    with torch.no_grad():\n        pi_v, mu_v, sigma_v = model_mdn(X_val_t)\n        val_loss = mdn_loss(pi_v, mu_v, sigma_v, y_val_t)\n\n    mdn_train_losses.append(loss.item())\n    mdn_val_losses.append(val_loss.item())\n\nprint(f\"Final train NLL: {mdn_train_losses[-1]:.4f}\")\nprint(f\"Final val NLL:   {mdn_val_losses[-1]:.4f}\")",
+  "lab8_step0_code": "import pandas as pd\n\n# Load the Airbnb dataset\ndf = pd.read_parquet(\"data/processed/airbnb_embedded.parquet\")\n\n# Filter price range\ndf = df[(df[\"price\"] >= 10) & (df[\"price\"] <= 2000)].reset_index(drop=True)\n\n# Compute descriptive statistics of the price column\nstats = {\n    \"mean\": df[\"price\"].mean(),\n    \"median\": df[\"price\"].median(),\n    \"std\": df[\"price\"].std(),\n    \"skewness\": df[\"price\"].skew()\n}\n\nprint(f\"Loaded {len(df):,} listings\")\nprint(f\"Price range: ${df['price'].min():.0f} - ${df['price'].max():.0f}\")\nfor k, v in stats.items():\n    print(f\"{k}: {v:.2f}\")",
+  "lab8_step_7_result": {
+    "output": "Final train loss: 0.0134\nFinal val loss:   0.2148\n",
+    "tb": null,
+    "passed": true,
+    "msg": "✅ Quantile regression complete! All three models trained."
+  },
+  "lab8_step_7_done": true,
+  "lab8_step7_code": "QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]\n\nclass SQRModel(nn.Module):\n    def __init__(self, n_quantiles=5):\n        super().__init__()\n        # TODO: Same trunk as MLP, but output n_quantiles instead of 1\n        self.net = nn.Sequential(\n            nn.Linear(768, 256),\n            nn.ReLU(),\n            nn.Linear(256, 128),\n            nn.ReLU(),\n            nn.Linear(128, n_quantiles)\n        )\n\n    def forward(self, x):\n        return self.net(x)  # shape (N, n_quantiles)\n\ndef pinball_loss(preds, targets, quantiles):\n    \"\"\"\n    preds: (N, Q) predicted quantiles\n    targets: (N,) true values\n    quantiles: list of Q quantile levels\n    \"\"\"\n    # TODO: Implement pinball loss\n    # Hint: errors = targets.unsqueeze(-1) - preds\n    # Then apply asymmetric weighting per quantile\n    errors = targets.unsqueeze(-1) - preds\n    loss = torch.maximum(quantiles * errors, (quantiles - 1) * errors)\n    return loss.mean()\n\nmodel_sqr = SQRModel(n_quantiles=len(QUANTILES))\noptimizer = optim.Adam(model_sqr.parameters(), lr=1e-3, weight_decay=1e-4)\nquantiles_t = torch.tensor(QUANTILES, dtype=torch.float32)\n\nsqr_train_losses = []\nsqr_val_losses = []\n\nfor epoch in range(300):\n    model_sqr.train()\n    optimizer.zero_grad()\n    preds = model_sqr(X_train_t)\n    loss = pinball_loss(preds, y_train_t, quantiles_t)\n    loss.backward()\n    optimizer.step()\n\n    model_sqr.eval()\n    with torch.no_grad():\n        val_preds = model_sqr(X_val_t)\n        val_loss = pinball_loss(val_preds, y_val_t, quantiles_t)\n\n    sqr_train_losses.append(loss.item())\n    sqr_val_losses.append(val_loss.item())\n\nprint(f\"Final train loss: {sqr_train_losses[-1]:.4f}\")\nprint(f\"Final val loss:   {sqr_val_losses[-1]:.4f}\")"
+}

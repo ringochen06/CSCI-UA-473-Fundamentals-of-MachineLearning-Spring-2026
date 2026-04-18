@@ -9,6 +9,9 @@ nightly price with three approaches:
 """
 
 import io
+import json
+import os
+import re
 import sys
 import traceback
 
@@ -47,6 +50,126 @@ _PRE_INJECTED = {
     "F": F,
     "math": __import__("math"),
 }
+
+# ----------------------------------------------------------------------
+# Persistence: lab_json/lab8_form_answers.json (codes, step flags, bundles — not lab8_vars)
+# ----------------------------------------------------------------------
+_LAB8_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+_LAB8_ANSWERS_DIR = os.path.join(_LAB8_ROOT, "lab_json")
+_LAB8_ANSWERS_FILE = os.path.join(_LAB8_ANSWERS_DIR, "lab8_form_answers.json")
+_LAB8_MANAGED_STEP_RE = re.compile(
+    r"^lab8_step[0-7]_code$|^lab8_step_[0-7]_(result|done)$"
+)
+
+
+def _lab8_is_managed_step_key(k):
+    return isinstance(k, str) and _LAB8_MANAGED_STEP_RE.match(k) is not None
+
+
+def _is_json_serializable(val):
+    try:
+        json.dumps(val)
+        return True
+    except (TypeError, OverflowError):
+        return False
+
+
+def _lab8_collect_managed_snapshot():
+    snap = {}
+    for k in list(st.session_state.keys()):
+        if _lab8_is_managed_step_key(k):
+            snap[k] = st.session_state[k]
+    return snap
+
+
+def _lab8_load():
+    if os.path.isfile(_LAB8_ANSWERS_FILE):
+        try:
+            with open(_LAB8_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _lab8_hydrate_flat_from_bundle(embedding_choice):
+    """Fill missing lab8_step* keys from the bundle for this embedding."""
+    bundles = st.session_state.get("lab8_bundles_by_embedding") or {}
+    snap = bundles.get(embedding_choice) or {}
+    for k, v in snap.items():
+        if not _lab8_is_managed_step_key(k):
+            continue
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+def _lab8_save_snapshot_str(data: dict) -> str:
+    return json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False)
+
+
+def _lab8_save():
+    emb = st.session_state.get("lab8_loaded_embedding_type") or st.session_state.get(
+        "lab8_embedding_choice"
+    )
+    if emb:
+        bundles = st.session_state.setdefault("lab8_bundles_by_embedding", {})
+        bundles[emb] = _lab8_collect_managed_snapshot()
+    data = {}
+    for key, val in st.session_state.items():
+        if not isinstance(key, str) or not key.startswith("lab8_"):
+            continue
+        if key == "lab8_vars":
+            continue
+        if key.startswith("lab8_run_"):
+            continue
+        if _is_json_serializable(val):
+            data[key] = val
+    try:
+        snap = _lab8_save_snapshot_str(data)
+        if st.session_state.get("_lab8_json_cache") == snap:
+            return
+        existing = {}
+        if os.path.isfile(_LAB8_ANSWERS_FILE):
+            with open(_LAB8_ANSWERS_FILE, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        if data == existing:
+            st.session_state["_lab8_json_cache"] = snap
+            return
+        os.makedirs(_LAB8_ANSWERS_DIR, exist_ok=True)
+        with open(_LAB8_ANSWERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        st.session_state["_lab8_json_cache"] = snap
+    except OSError:
+        pass
+
+
+def _ensure_lab8_vars():
+    if "lab8_vars" not in st.session_state:
+        st.session_state["lab8_vars"] = dict(_PRE_INJECTED)
+
+
+def _lab8_monaco_value(key, default_code):
+    v = st.session_state.get(key)
+    if isinstance(v, str) and v.strip():
+        return v
+    return default_code
+
+
+def _lab8_sync_monaco_code(key, code):
+    """Write Monaco output to session. Empty string from off-screen editors must not wipe saved code."""
+    if not isinstance(code, str):
+        return
+    prev = st.session_state.get(key, "")
+    if code.strip():
+        if st.session_state.get(key) != code:
+            st.session_state[key] = code
+        return
+    if isinstance(prev, str) and prev.strip():
+        return
+    if st.session_state.get(key) != code:
+        st.session_state[key] = code
 
 
 def _exec_with_capture(code, local_vars):
@@ -196,11 +319,13 @@ for k, v in stats.items():
 
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code,
+        value=_lab8_monaco_value("lab8_step0_code", default_code),
         height="300px",
         language="python",
         theme="vs-dark",
     )
+    _lab8_sync_monaco_code("lab8_step0_code", code)
+    code = _lab8_monaco_value("lab8_step0_code", default_code)
 
     if st.button("Run Step 0", key="lab8_run_0"):
         st.session_state["lab8_vars"] = dict(_PRE_INJECTED)
@@ -218,50 +343,56 @@ for k, v in stats.items():
     passed, shown = _show_result("lab8_step_0_result")
     if passed:
         lv = st.session_state["lab8_vars"]
-        df = lv["df"]
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            fig = px.histogram(
-                df,
-                x="price",
-                nbins=80,
-                title="Raw Price Distribution",
-                labels={"price": "Price ($)"},
+        if "df" not in lv:
+            st.info(
+                "Step 0 checks are saved, but `df` is not in memory. "
+                "Click **Run Step 0** once to reload data."
             )
-            fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
+        else:
+            df = lv["df"]
 
-        with col_b:
-            log_price = np.log1p(df["price"].values)
-            fig = px.histogram(
-                x=log_price,
-                nbins=80,
-                title="log(1 + price) Distribution",
-                labels={"x": "log(1 + price)"},
+            col_a, col_b = st.columns(2)
+            with col_a:
+                fig = px.histogram(
+                    df,
+                    x="price",
+                    nbins=80,
+                    title="Raw Price Distribution",
+                    labels={"price": "Price ($)"},
+                )
+                fig.update_layout(height=350)
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col_b:
+                log_price = np.log1p(df["price"].values)
+                fig = px.histogram(
+                    x=log_price,
+                    nbins=80,
+                    title="log(1 + price) Distribution",
+                    labels={"x": "log(1 + price)"},
+                )
+                fig.update_layout(height=350)
+                st.plotly_chart(fig, use_container_width=True)
+
+            if "neighbourhood_group_cleansed" in df.columns:
+                fig = px.box(
+                    df,
+                    x="neighbourhood_group_cleansed",
+                    y="price",
+                    title="Price by Borough",
+                    labels={
+                        "neighbourhood_group_cleansed": "Borough",
+                        "price": "Price ($)",
+                    },
+                )
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown(
+                r"""
+                **Why does distribution shape matter for regression?**
+                """
             )
-            fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
-
-        if "neighbourhood_group_cleansed" in df.columns:
-            fig = px.box(
-                df,
-                x="neighbourhood_group_cleansed",
-                y="price",
-                title="Price by Borough",
-                labels={
-                    "neighbourhood_group_cleansed": "Borough",
-                    "price": "Price ($)",
-                },
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
-
-        st.markdown(
-            r"""
-            **Why does distribution shape matter for regression?**
-            """
-        )
 
 
 # ======================================================================
@@ -320,11 +451,13 @@ print(f"y range: {{y.min():.2f}} – {{y.max():.2f}}")"""
 
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code,
+        value=_lab8_monaco_value("lab8_step1_code", default_code),
         height="240px",
         language="python",
         theme="vs-dark",
     )
+    _lab8_sync_monaco_code("lab8_step1_code", code)
+    code = _lab8_monaco_value("lab8_step1_code", default_code)
 
     if st.button("Run Step 1", key="lab8_run_1"):
         result = _run_and_save(
@@ -409,14 +542,16 @@ class MLPRegressor(nn.Module):
     def forward(self, x):
         return self.net(x).squeeze(-1)"""
 
-    mode = "sol" if show_solutions else "stu"
+    "sol" if show_solutions else "stu"
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code,
+        value=_lab8_monaco_value("lab8_step2_code", default_code),
         height="280px",
         language="python",
         theme="vs-dark",
     )
+    _lab8_sync_monaco_code("lab8_step2_code", code)
+    code = _lab8_monaco_value("lab8_step2_code", default_code)
 
     if st.button("Check Architecture", key="lab8_run_2"):
         exec_vars = dict(st.session_state["lab8_vars"])
@@ -535,14 +670,16 @@ for epoch in range(300):
 print(f"Final train loss: {mlp_train_losses[-1]:.4f}")
 print(f"Final val loss:   {mlp_val_losses[-1]:.4f}")"""
 
-    mode = "sol" if show_solutions else "stu"
+    "sol" if show_solutions else "stu"
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code,
+        value=_lab8_monaco_value("lab8_step3_code", default_code),
         height="420px",
         language="python",
         theme="vs-dark",
     )
+    _lab8_sync_monaco_code("lab8_step3_code", code)
+    code = _lab8_monaco_value("lab8_step3_code", default_code)
 
     if st.button("Train MLP", key="lab8_run_3"):
         if "MLPRegressor" not in st.session_state["lab8_vars"]:
@@ -570,52 +707,61 @@ print(f"Final val loss:   {mlp_val_losses[-1]:.4f}")"""
 
     # --- Persistent output ---
     _plot_loss_curve(
-        "mlp_train_losses_step3", "mlp_val_losses_step3", "MLP Training Loss (MSE)", "MSE Loss"
+        "mlp_train_losses_step3",
+        "mlp_val_losses_step3",
+        "MLP Training Loss (MSE)",
+        "MSE Loss",
     )
 
     passed, shown = _show_result("lab8_step_3_result")
     if passed:
         lv = st.session_state["lab8_vars"]
-        test_preds = lv["step3_test_preds"]
-        y_test = lv["step3_y_test"]
-
-        pred_dollars = np.expm1(test_preds)
-        true_dollars = np.expm1(y_test)
-
-        from sklearn.metrics import mean_absolute_error, r2_score
-
-        r2 = r2_score(true_dollars, pred_dollars)
-        mae = mean_absolute_error(true_dollars, pred_dollars)
-
-        col1, col2 = st.columns(2)
-        col1.metric("R² (test, $)", f"{r2:.3f}")
-        col2.metric("MAE (test, $)", f"${mae:.2f}")
-
-        scatter_df = pd.DataFrame(
-            {
-                "True Price ($)": true_dollars,
-                "Predicted Price ($)": pred_dollars,
-            }
-        )
-        fig = px.scatter(
-            scatter_df,
-            x="True Price ($)",
-            y="Predicted Price ($)",
-            title="MLP: Predicted vs Actual (Test Set)",
-            opacity=0.4,
-        )
-        max_val = max(true_dollars.max(), pred_dollars.max())
-        fig.add_trace(
-            go.Scatter(
-                x=[0, max_val],
-                y=[0, max_val],
-                mode="lines",
-                name="Perfect",
-                line=dict(dash="dash", color="gray"),
+        if "step3_test_preds" not in lv or "step3_y_test" not in lv:
+            st.info(
+                "Step 3 is marked complete, but prediction snapshots are missing. "
+                "Click **Train MLP** once to refresh."
             )
-        )
-        fig.update_layout(height=450)
-        st.plotly_chart(fig, use_container_width=True)
+        else:
+            test_preds = lv["step3_test_preds"]
+            y_test = lv["step3_y_test"]
+
+            pred_dollars = np.expm1(test_preds)
+            true_dollars = np.expm1(y_test)
+
+            from sklearn.metrics import mean_absolute_error, r2_score
+
+            r2 = r2_score(true_dollars, pred_dollars)
+            mae = mean_absolute_error(true_dollars, pred_dollars)
+
+            col1, col2 = st.columns(2)
+            col1.metric("R² (test, $)", f"{r2:.3f}")
+            col2.metric("MAE (test, $)", f"${mae:.2f}")
+
+            scatter_df = pd.DataFrame(
+                {
+                    "True Price ($)": true_dollars,
+                    "Predicted Price ($)": pred_dollars,
+                }
+            )
+            fig = px.scatter(
+                scatter_df,
+                x="True Price ($)",
+                y="Predicted Price ($)",
+                title="MLP: Predicted vs Actual (Test Set)",
+                opacity=0.4,
+            )
+            max_val = max(true_dollars.max(), pred_dollars.max())
+            fig.add_trace(
+                go.Scatter(
+                    x=[0, max_val],
+                    y=[0, max_val],
+                    mode="lines",
+                    name="Perfect",
+                    line=dict(dash="dash", color="gray"),
+                )
+            )
+            fig.update_layout(height=450)
+            st.plotly_chart(fig, use_container_width=True)
 
 
 # ======================================================================
@@ -736,11 +882,13 @@ print(f"Final val loss:   {mlp_val_losses[-1]:.4f}")"""
 
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code,
+        value=_lab8_monaco_value("lab8_step4_code", default_code),
         height="450px",
         language="python",
         theme="vs-dark",
     )
+    _lab8_sync_monaco_code("lab8_step4_code", code)
+    code = _lab8_monaco_value("lab8_step4_code", default_code)
 
     if st.button("Train Standardized MLP", key="lab8_run_4"):
         if "MLPRegressor" not in st.session_state["lab8_vars"]:
@@ -768,53 +916,61 @@ print(f"Final val loss:   {mlp_val_losses[-1]:.4f}")"""
 
     # --- Persistent output ---
     _plot_loss_curve(
-        "mlp_train_losses_step4", "mlp_val_losses_step4",
-        "Standardized MLP Training Loss (MSE)", "MSE Loss",
+        "mlp_train_losses_step4",
+        "mlp_val_losses_step4",
+        "Standardized MLP Training Loss (MSE)",
+        "MSE Loss",
     )
 
     passed, shown = _show_result("lab8_step_4_result")
     if passed:
         lv = st.session_state["lab8_vars"]
-        test_preds = lv["step4_test_preds"]
-        y_test = lv["step4_y_test"]
-
-        pred_dollars = np.expm1(test_preds)
-        true_dollars = np.expm1(y_test)
-
-        from sklearn.metrics import mean_absolute_error, r2_score
-
-        r2 = r2_score(true_dollars, pred_dollars)
-        mae = mean_absolute_error(true_dollars, pred_dollars)
-
-        col1, col2 = st.columns(2)
-        col1.metric("R² (test, $)", f"{r2:.3f}")
-        col2.metric("MAE (test, $)", f"${mae:.2f}")
-
-        scatter_df = pd.DataFrame(
-            {
-                "True Price ($)": true_dollars,
-                "Predicted Price ($)": pred_dollars,
-            }
-        )
-        fig = px.scatter(
-            scatter_df,
-            x="True Price ($)",
-            y="Predicted Price ($)",
-            title="Standardized MLP: Predicted vs Actual (Test Set)",
-            opacity=0.4,
-        )
-        max_val = max(true_dollars.max(), pred_dollars.max())
-        fig.add_trace(
-            go.Scatter(
-                x=[0, max_val],
-                y=[0, max_val],
-                mode="lines",
-                name="Perfect",
-                line=dict(dash="dash", color="gray"),
+        if "step4_test_preds" not in lv or "step4_y_test" not in lv:
+            st.info(
+                "Step 4 is marked complete, but test prediction snapshots are not in memory "
+                "(new session or reload). Click **Train Standardized MLP** once to refresh."
             )
-        )
-        fig.update_layout(height=450)
-        st.plotly_chart(fig, use_container_width=True)
+        else:
+            test_preds = lv["step4_test_preds"]
+            y_test = lv["step4_y_test"]
+
+            pred_dollars = np.expm1(test_preds)
+            true_dollars = np.expm1(y_test)
+
+            from sklearn.metrics import mean_absolute_error, r2_score
+
+            r2 = r2_score(true_dollars, pred_dollars)
+            mae = mean_absolute_error(true_dollars, pred_dollars)
+
+            col1, col2 = st.columns(2)
+            col1.metric("R² (test, $)", f"{r2:.3f}")
+            col2.metric("MAE (test, $)", f"${mae:.2f}")
+
+            scatter_df = pd.DataFrame(
+                {
+                    "True Price ($)": true_dollars,
+                    "Predicted Price ($)": pred_dollars,
+                }
+            )
+            fig = px.scatter(
+                scatter_df,
+                x="True Price ($)",
+                y="Predicted Price ($)",
+                title="Standardized MLP: Predicted vs Actual (Test Set)",
+                opacity=0.4,
+            )
+            max_val = max(true_dollars.max(), pred_dollars.max())
+            fig.add_trace(
+                go.Scatter(
+                    x=[0, max_val],
+                    y=[0, max_val],
+                    mode="lines",
+                    name="Perfect",
+                    line=dict(dash="dash", color="gray"),
+                )
+            )
+            fig.update_layout(height=450)
+            st.plotly_chart(fig, use_container_width=True)
 
 
 # ======================================================================
@@ -936,14 +1092,16 @@ class MDN(nn.Module):
         sigma = F.softplus(self.sigma_head(h)) + 1e-6
         return pi, mu, sigma"""
 
-    mode = "sol" if show_solutions else "stu"
+    "sol" if show_solutions else "stu"
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code,
+        value=_lab8_monaco_value("lab8_step5_code", default_code),
         height="340px",
         language="python",
         theme="vs-dark",
     )
+    _lab8_sync_monaco_code("lab8_step5_code", code)
+    code = _lab8_monaco_value("lab8_step5_code", default_code)
 
     if st.button("Check MDN Architecture", key="lab8_run_5"):
         exec_vars = dict(st.session_state["lab8_vars"])
@@ -1060,14 +1218,16 @@ for epoch in range(300):
 print(f"Final train NLL: {mdn_train_losses[-1]:.4f}")
 print(f"Final val NLL:   {mdn_val_losses[-1]:.4f}")"""
 
-    mode = "sol" if show_solutions else "stu"
+    "sol" if show_solutions else "stu"
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code,
+        value=_lab8_monaco_value("lab8_step6_code", default_code),
         height="400px",
         language="python",
         theme="vs-dark",
     )
+    _lab8_sync_monaco_code("lab8_step6_code", code)
+    code = _lab8_monaco_value("lab8_step6_code", default_code)
 
     if st.button("Train MDN", key="lab8_run_6"):
         if "MDN" not in st.session_state["lab8_vars"]:
@@ -1092,98 +1252,113 @@ print(f"Final val NLL:   {mdn_val_losses[-1]:.4f}")"""
     passed, shown = _show_result("lab8_step_6_result")
     if passed:
         lv = st.session_state["lab8_vars"]
+        _need_mdn = ("model_mdn", "X_test_t", "y_test")
+        if any(k not in lv for k in _need_mdn):
+            st.info(
+                "Step 6 checks are saved, but `model_mdn` or test tensors are not in memory. "
+                "Click **Train MDN** once to refresh."
+            )
+        else:
+            # --- Component means visualization ---
+            st.markdown(
+                "**Component means across test listings (sorted by true price):**"
+            )
+            model_mdn = lv["model_mdn"]
+            model_mdn.eval()
+            with torch.no_grad():
+                pi_all, mu_all, sigma_all = model_mdn(lv["X_test_t"])
 
-        # --- Component means visualization ---
-        st.markdown("**Component means across test listings (sorted by true price):**")
-        model_mdn = lv["model_mdn"]
-        model_mdn.eval()
-        with torch.no_grad():
-            pi_all, mu_all, sigma_all = model_mdn(lv["X_test_t"])
+            y_test = lv["y_test"]
+            pi_np = pi_all.numpy()
+            mu_np = mu_all.numpy()
+            K = mu_np.shape[1]
 
-        y_test = lv["y_test"]
-        pi_np = pi_all.numpy()
-        mu_np = mu_all.numpy()
-        K = mu_np.shape[1]
+            # Sort listings by true price
+            sort_idx = np.argsort(y_test)
+            x_axis = np.arange(len(sort_idx))
+            true_sorted = np.expm1(y_test[sort_idx])
 
-        # Sort listings by true price
-        sort_idx = np.argsort(y_test)
-        x_axis = np.arange(len(sort_idx))
-        true_sorted = np.expm1(y_test[sort_idx])
+            comp_colors = [
+                "#E74C3C",
+                "#2ECC71",
+                "#9B59B6",
+                "#F39C12",
+                "#1ABC9C",
+                "#3498DB",
+                "#E67E22",
+                "#8E44AD",
+            ]
 
-        comp_colors = [
-            "#E74C3C", "#2ECC71", "#9B59B6", "#F39C12", "#1ABC9C",
-            "#3498DB", "#E67E22", "#8E44AD",
-        ]
-
-        fig = go.Figure()
-        for k in range(K):
-            mu_k_sorted = np.expm1(mu_np[sort_idx, k])
-            pi_k_sorted = pi_np[sort_idx, k]
+            fig = go.Figure()
+            for k in range(K):
+                mu_k_sorted = np.expm1(mu_np[sort_idx, k])
+                pi_k_sorted = pi_np[sort_idx, k]
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_axis,
+                        y=mu_k_sorted,
+                        mode="markers",
+                        name=f"Component {k + 1}",
+                        marker=dict(
+                            size=pi_k_sorted * 12 + 2,
+                            color=comp_colors[k % len(comp_colors)],
+                            opacity=0.6,
+                        ),
+                        hovertemplate=(
+                            "mean=$%{y:.0f}<br>"
+                            "weight=%{customdata:.2f}"
+                            "<extra></extra>"
+                        ),
+                        customdata=pi_k_sorted,
+                    )
+                )
             fig.add_trace(
                 go.Scatter(
                     x=x_axis,
-                    y=mu_k_sorted,
+                    y=true_sorted,
                     mode="markers",
-                    name=f"Component {k + 1}",
-                    marker=dict(
-                        size=pi_k_sorted * 12 + 2,
-                        color=comp_colors[k % len(comp_colors)],
-                        opacity=0.6,
-                    ),
-                    hovertemplate=(
-                        "mean=$%{y:.0f}<br>"
-                        f"weight=%{{customdata:.2f}}"
-                        "<extra></extra>"
-                    ),
-                    customdata=pi_k_sorted,
+                    name="True Price",
+                    marker=dict(size=3, color="black"),
                 )
             )
-        fig.add_trace(
-            go.Scatter(
-                x=x_axis,
-                y=true_sorted,
-                mode="markers",
-                name="True Price",
-                marker=dict(size=3, color="black"),
+            fig.update_layout(
+                title="MDN Component Means (dot size = mixing weight)",
+                xaxis_title="Listings (sorted by true price)",
+                yaxis_title="Price ($)",
+                height=500,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02),
             )
-        )
-        fig.update_layout(
-            title="MDN Component Means (dot size = mixing weight)",
-            xaxis_title="Listings (sorted by true price)",
-            yaxis_title="Price ($)",
-            height=500,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
 
-        # --- Uncertainty scatter ---
-        st.markdown("**Predicted mean vs. uncertainty:**")
-        with torch.no_grad():
-            pi_t, mu_t, sigma_t = model_mdn(lv["X_test_t"])
-        expected_y = (pi_t * mu_t).sum(dim=1).numpy()
-        expected_std = torch.sqrt(
-            (pi_t * (sigma_t**2 + mu_t**2)).sum(dim=1) - ((pi_t * mu_t).sum(dim=1)) ** 2
-        ).numpy()
+            # --- Uncertainty scatter ---
+            st.markdown("**Predicted mean vs. uncertainty:**")
+            with torch.no_grad():
+                pi_t, mu_t, sigma_t = model_mdn(lv["X_test_t"])
+            expected_y = (pi_t * mu_t).sum(dim=1).numpy()
+            expected_std = torch.sqrt(
+                (pi_t * (sigma_t**2 + mu_t**2)).sum(dim=1)
+                - ((pi_t * mu_t).sum(dim=1)) ** 2
+            ).numpy()
 
-        unc_df = pd.DataFrame(
-            {
-                "Predicted Mean ($)": np.expm1(expected_y),
-                "Predicted Std ($)": np.expm1(expected_y + expected_std)
-                - np.expm1(expected_y),
-                "True Price ($)": np.expm1(y_test),
-            }
-        )
-        fig = px.scatter(
-            unc_df,
-            x="Predicted Mean ($)",
-            y="Predicted Std ($)",
-            color="True Price ($)",
-            title="MDN: Predicted Mean vs Uncertainty",
-            opacity=0.5,
-            color_continuous_scale="Viridis",
-        )
-        fig.update_layout(height=450)
-        st.plotly_chart(fig, use_container_width=True)
+            unc_df = pd.DataFrame(
+                {
+                    "Predicted Mean ($)": np.expm1(expected_y),
+                    "Predicted Std ($)": np.expm1(expected_y + expected_std)
+                    - np.expm1(expected_y),
+                    "True Price ($)": np.expm1(y_test),
+                }
+            )
+            fig = px.scatter(
+                unc_df,
+                x="Predicted Mean ($)",
+                y="Predicted Std ($)",
+                color="True Price ($)",
+                title="MDN: Predicted Mean vs Uncertainty",
+                opacity=0.5,
+                color_continuous_scale="Viridis",
+            )
+            fig.update_layout(height=450)
+            st.plotly_chart(fig, use_container_width=True)
 
 
 # ======================================================================
@@ -1228,7 +1403,7 @@ def _render_step_7(show_solutions=False):
 
     emb_dim = st.session_state.get("lab8_vars", {}).get("EMB_DIM", 768)
 
-    student_code = f"""\
+    student_code = """\
 QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]
 
 class SQRModel(nn.Module):
@@ -1271,8 +1446,8 @@ for epoch in range(300):
     # sqr_train_losses.append(...)
     # sqr_val_losses.append(...)
 
-print(f"Final train loss: {{sqr_train_losses[-1]:.4f}}")
-print(f"Final val loss:   {{sqr_val_losses[-1]:.4f}}")"""
+print(f"Final train loss: {sqr_train_losses[-1]:.4f}")
+print(f"Final val loss:   {sqr_val_losses[-1]:.4f}")"""
 
     solution_code = f"""\
 QUANTILES = [0.1, 0.25, 0.5, 0.75, 0.9]
@@ -1326,14 +1501,15 @@ for epoch in range(300):
 print(f"Final train loss: {{sqr_train_losses[-1]:.4f}}")
 print(f"Final val loss:   {{sqr_val_losses[-1]:.4f}}")"""
 
-    mode = "sol" if show_solutions else "stu"
     default_code = solution_code if show_solutions else student_code
     code = st_monaco(
-        value=default_code,
+        value=_lab8_monaco_value("lab8_step7_code", default_code),
         height="450px",
         language="python",
         theme="vs-dark",
     )
+    _lab8_sync_monaco_code("lab8_step7_code", code)
+    code = _lab8_monaco_value("lab8_step7_code", default_code)
 
     if st.button("Train SQR", key="lab8_run_7"):
         if "X_train_t" not in st.session_state["lab8_vars"]:
@@ -1362,155 +1538,167 @@ print(f"Final val loss:   {{sqr_val_losses[-1]:.4f}}")"""
     passed, shown = _show_result("lab8_step_7_result")
     if passed:
         lv = st.session_state["lab8_vars"]
-
-        # --- Quantile fan plot ---
-        st.markdown("**Quantile Fan Plot (test set, sorted by median):**")
-        model_sqr = lv["model_sqr"]
-        model_sqr.eval()
-        with torch.no_grad():
-            q_preds = model_sqr(lv["X_test_t"]).numpy()  # (N, 5)
-
-        y_test = lv["y_test"]
-        q_dollars = np.expm1(q_preds)
-        true_dollars = np.expm1(y_test)
-
-        sort_idx = np.argsort(q_preds[:, 2])
-        q_sorted = q_dollars[sort_idx]
-        true_sorted = true_dollars[sort_idx]
-        x_axis = np.arange(len(sort_idx))
-
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=np.concatenate([x_axis, x_axis[::-1]]),
-                y=np.concatenate([q_sorted[:, 4], q_sorted[::-1, 0]]),
-                fill="toself",
-                fillcolor="rgba(74,144,217,0.15)",
-                line=dict(color="rgba(255,255,255,0)"),
-                name="Q10–Q90",
+        _need_sqr_viz = ("model_sqr", "X_test_t", "y_test")
+        if any(k not in lv for k in _need_sqr_viz):
+            st.info(
+                "Step 7 checks are saved, but `model_sqr` or test tensors are not in memory. "
+                "Click **Train SQR** once after Steps 1–3."
             )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=np.concatenate([x_axis, x_axis[::-1]]),
-                y=np.concatenate([q_sorted[:, 3], q_sorted[::-1, 1]]),
-                fill="toself",
-                fillcolor="rgba(74,144,217,0.3)",
-                line=dict(color="rgba(255,255,255,0)"),
-                name="Q25–Q75",
+        else:
+            # --- Quantile fan plot ---
+            st.markdown("**Quantile Fan Plot (test set, sorted by median):**")
+            model_sqr = lv["model_sqr"]
+            model_sqr.eval()
+            with torch.no_grad():
+                q_preds = model_sqr(lv["X_test_t"]).numpy()  # (N, 5)
+
+            y_test = lv["y_test"]
+            q_dollars = np.expm1(q_preds)
+            true_dollars = np.expm1(y_test)
+
+            sort_idx = np.argsort(q_preds[:, 2])
+            q_sorted = q_dollars[sort_idx]
+            true_sorted = true_dollars[sort_idx]
+            x_axis = np.arange(len(sort_idx))
+
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=np.concatenate([x_axis, x_axis[::-1]]),
+                    y=np.concatenate([q_sorted[:, 4], q_sorted[::-1, 0]]),
+                    fill="toself",
+                    fillcolor="rgba(74,144,217,0.15)",
+                    line=dict(color="rgba(255,255,255,0)"),
+                    name="Q10–Q90",
+                )
             )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=x_axis,
-                y=q_sorted[:, 2],
-                mode="lines",
-                name="Median (Q50)",
-                line=dict(color="#4A90D9", width=2),
+            fig.add_trace(
+                go.Scatter(
+                    x=np.concatenate([x_axis, x_axis[::-1]]),
+                    y=np.concatenate([q_sorted[:, 3], q_sorted[::-1, 1]]),
+                    fill="toself",
+                    fillcolor="rgba(74,144,217,0.3)",
+                    line=dict(color="rgba(255,255,255,0)"),
+                    name="Q25–Q75",
+                )
             )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=x_axis,
-                y=true_sorted,
-                mode="markers",
-                name="True Price",
-                marker=dict(color="#E74C3C", size=3, opacity=0.5),
+            fig.add_trace(
+                go.Scatter(
+                    x=x_axis,
+                    y=q_sorted[:, 2],
+                    mode="lines",
+                    name="Median (Q50)",
+                    line=dict(color="#4A90D9", width=2),
+                )
             )
-        )
-        fig.update_layout(
-            title="Quantile Fan Plot",
-            xaxis_title="Listings (sorted by median prediction)",
-            yaxis_title="Price ($)",
-            height=500,
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        # --- Median predicted vs actual ---
-        from sklearn.metrics import mean_absolute_error, r2_score
-
-        median_dollars = q_dollars[:, 2]
-        r2 = r2_score(true_dollars, median_dollars)
-        mae = mean_absolute_error(true_dollars, median_dollars)
-
-        col1, col2 = st.columns(2)
-        col1.metric("R² (median, $)", f"{r2:.3f}")
-        col2.metric("MAE (median, $)", f"${mae:.2f}")
-
-        scatter_df = pd.DataFrame(
-            {
-                "True Price ($)": true_dollars,
-                "Predicted Median ($)": median_dollars,
-                "80% Interval Width ($)": q_dollars[:, 4] - q_dollars[:, 0],
-            }
-        )
-        fig = px.scatter(
-            scatter_df,
-            x="True Price ($)",
-            y="Predicted Median ($)",
-            color="80% Interval Width ($)",
-            title="SQR: Predicted Median vs Actual (color = prediction interval width)",
-            opacity=0.5,
-            color_continuous_scale="Viridis",
-        )
-        max_val = max(true_dollars.max(), median_dollars.max())
-        fig.add_trace(
-            go.Scatter(
-                x=[0, max_val],
-                y=[0, max_val],
-                mode="lines",
-                name="Perfect",
-                line=dict(dash="dash", color="gray"),
-                showlegend=False,
+            fig.add_trace(
+                go.Scatter(
+                    x=x_axis,
+                    y=true_sorted,
+                    mode="markers",
+                    name="True Price",
+                    marker=dict(color="#E74C3C", size=3, opacity=0.5),
+                )
             )
-        )
-        fig.update_layout(height=450)
-        st.plotly_chart(fig, use_container_width=True)
+            fig.update_layout(
+                title="Quantile Fan Plot",
+                xaxis_title="Listings (sorted by median prediction)",
+                yaxis_title="Price ($)",
+                height=500,
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-        # --- Coverage calibration ---
-        st.markdown("**Coverage Calibration:**")
-        coverage_data = []
-        for i, q in enumerate(QUANTILES):
-            below = (y_test <= q_preds[:, i]).mean()
-            coverage_data.append(
+            # --- Median predicted vs actual ---
+            from sklearn.metrics import mean_absolute_error, r2_score
+
+            median_dollars = q_dollars[:, 2]
+            r2 = r2_score(true_dollars, median_dollars)
+            mae = mean_absolute_error(true_dollars, median_dollars)
+
+            col1, col2 = st.columns(2)
+            col1.metric("R² (median, $)", f"{r2:.3f}")
+            col2.metric("MAE (median, $)", f"${mae:.2f}")
+
+            scatter_df = pd.DataFrame(
                 {
-                    "Quantile": f"Q{int(q * 100)}",
-                    "Expected Coverage": f"{q:.0%}",
-                    "Actual Coverage": f"{below:.1%}",
+                    "True Price ($)": true_dollars,
+                    "Predicted Median ($)": median_dollars,
+                    "80% Interval Width ($)": q_dollars[:, 4] - q_dollars[:, 0],
                 }
             )
-        st.table(pd.DataFrame(coverage_data))
-
-        # --- 3-model comparison ---
-        st.markdown("**Model Comparison (Test Set):**")
-
-        model_mlp = lv["model_mlp"]
-        model_mdn = lv["model_mdn"]
-
-        model_mlp.eval()
-        model_mdn.eval()
-        with torch.no_grad():
-            mlp_preds = model_mlp(lv["X_test_t"]).numpy()
-            pi, mu, sigma = model_mdn(lv["X_test_t"])
-            mdn_mean = (pi * mu).sum(dim=1).numpy()
-            sqr_median = q_preds[:, 2]
-
-        results = []
-        for name, preds_log in [
-            ("MLP (point)", mlp_preds),
-            ("MDN (expected value)", mdn_mean),
-            ("SQR (median)", sqr_median),
-        ]:
-            p_dollar = np.expm1(preds_log)
-            t_dollar = np.expm1(y_test)
-            results.append(
-                {
-                    "Model": name,
-                    "R²": f"{r2_score(t_dollar, p_dollar):.3f}",
-                    "MAE ($)": f"${mean_absolute_error(t_dollar, p_dollar):.2f}",
-                }
+            fig = px.scatter(
+                scatter_df,
+                x="True Price ($)",
+                y="Predicted Median ($)",
+                color="80% Interval Width ($)",
+                title="SQR: Predicted Median vs Actual (color = prediction interval width)",
+                opacity=0.5,
+                color_continuous_scale="Viridis",
             )
-        st.table(pd.DataFrame(results))
+            max_val = max(true_dollars.max(), median_dollars.max())
+            fig.add_trace(
+                go.Scatter(
+                    x=[0, max_val],
+                    y=[0, max_val],
+                    mode="lines",
+                    name="Perfect",
+                    line=dict(dash="dash", color="gray"),
+                    showlegend=False,
+                )
+            )
+            fig.update_layout(height=450)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # --- Coverage calibration ---
+            st.markdown("**Coverage Calibration:**")
+            coverage_data = []
+            for i, q in enumerate(QUANTILES):
+                below = (y_test <= q_preds[:, i]).mean()
+                coverage_data.append(
+                    {
+                        "Quantile": f"Q{int(q * 100)}",
+                        "Expected Coverage": f"{q:.0%}",
+                        "Actual Coverage": f"{below:.1%}",
+                    }
+                )
+            st.table(pd.DataFrame(coverage_data))
+
+            # --- 3-model comparison (optional: needs MLP + MDN from earlier steps) ---
+            if "model_mlp" in lv and "model_mdn" in lv:
+                st.markdown("**Model Comparison (Test Set):**")
+
+                model_mlp = lv["model_mlp"]
+                model_mdn = lv["model_mdn"]
+
+                model_mlp.eval()
+                model_mdn.eval()
+                with torch.no_grad():
+                    mlp_preds = model_mlp(lv["X_test_t"]).numpy()
+                    pi, mu, sigma = model_mdn(lv["X_test_t"])
+                    mdn_mean = (pi * mu).sum(dim=1).numpy()
+                    sqr_median = q_preds[:, 2]
+
+                results = []
+                for name, preds_log in [
+                    ("MLP (point)", mlp_preds),
+                    ("MDN (expected value)", mdn_mean),
+                    ("SQR (median)", sqr_median),
+                ]:
+                    p_dollar = np.expm1(preds_log)
+                    t_dollar = np.expm1(y_test)
+                    results.append(
+                        {
+                            "Model": name,
+                            "R²": f"{r2_score(t_dollar, p_dollar):.3f}",
+                            "MAE ($)": f"${mean_absolute_error(t_dollar, p_dollar):.2f}",
+                        }
+                    )
+                st.table(pd.DataFrame(results))
+            else:
+                st.caption(
+                    "Train MLP (Steps 2–3) and MDN (Steps 5–6) in this session to see the "
+                    "3-model comparison table. SQR plots above only need Step 7."
+                )
 
 
 # ======================================================================
@@ -1526,6 +1714,11 @@ _EMBEDDING_OPTIONS = {
 
 
 def render_regression_lab(show_solutions=False):
+    saved = _lab8_load()
+    for k, v in saved.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
     st.header("Lab 8: Regression — Point, MDN, and Quantile")
     st.markdown(
         """
@@ -1545,20 +1738,29 @@ def render_regression_lab(show_solutions=False):
         key="lab8_embedding_choice",
     )
     emb_cfg = _EMBEDDING_OPTIONS[embedding_choice]
+    bundles = st.session_state.setdefault("lab8_bundles_by_embedding", {})
 
-    # Clear all lab state when embedding type changes
-    if st.session_state.get("lab8_loaded_embedding_type") != embedding_choice:
+    prev_emb = st.session_state.get("lab8_loaded_embedding_type")
+    if prev_emb is None:
+        st.session_state["lab8_loaded_embedding_type"] = embedding_choice
+    elif prev_emb != embedding_choice:
+        bundles[prev_emb] = _lab8_collect_managed_snapshot()
         for key in list(st.session_state.keys()):
             if key.startswith("lab8_") and key not in (
                 "lab8_embedding_choice",
                 "lab8_loaded_embedding_type",
+                "lab8_bundles_by_embedding",
             ):
                 del st.session_state[key]
         st.session_state["lab8_loaded_embedding_type"] = embedding_choice
+        snap = bundles.get(embedding_choice) or {}
+        for k, v in snap.items():
+            if _lab8_is_managed_step_key(k):
+                st.session_state[k] = v
 
-    if "lab8_vars" not in st.session_state:
-        st.session_state["lab8_vars"] = dict(_PRE_INJECTED)
+    _lab8_hydrate_flat_from_bundle(embedding_choice)
 
+    _ensure_lab8_vars()
     st.session_state["lab8_vars"]["EMB_COL"] = emb_cfg["col"]
     st.session_state["lab8_vars"]["EMB_DIM"] = emb_cfg["dim"]
 
@@ -1584,3 +1786,5 @@ def render_regression_lab(show_solutions=False):
 
     if st.session_state.get("lab8_step_6_done"):
         _render_step_7(show_solutions)
+
+    _lab8_save()
